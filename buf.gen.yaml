@@ -8,5 +8,4 @@ plugins:
     out: gen/go
     opt:
       - paths=source_relative
-  - remote: buf.build/protocolbuffers/prost
-    out: gen/rust
+  # Rust codegen handled by prost-build in services/scanner/build.rs
