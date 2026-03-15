@@ -1,4 +1,5 @@
-h1:v2e4o22Vy19mMtkT90+2QaF89mnGckFOuTolLwpl6QQ=
+h1:fSvdET1g61yUZyZKYXFlOcdZ8U4csCfppDOdPTWZLyA=
 20260315000000_init.sql h1:WKv3ryNkONssgWkzdd4wkwqN6RJQ1pQCA9RpSO00fGY=
 20260315100000_add_vuln_instance_unique.sql h1:eenOra3Y7HJ2KvlVUJvv19NO7tlBqeswITQrXyoYfns=
 20260315200000_m2_enrichment_tables.sql h1:jvnBOr4QqXswHosCxKE/ezUcI1rx61r1vGt3oPSueoE=
+20260316000000_m3_job_leases.sql h1:1iyhoHg7mfsN5teRmbCZjeIyDqca4BPXFYtHdfxvJLA=
