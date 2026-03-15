@@ -1,0 +1,36 @@
+# Build artifacts
+target/
+node_modules/
+dist/
+gen/
+
+# Environment & Secrets
+.env
+secrets/*.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Rust
+*.rs.bk
+
+# Go
+*.exe
+*.test
+*.prof
+
+# Docker
+.docker/
+
+# Atlas
+*.sqlite
+.claude/
+services/eye/.svelte-kit/
