@@ -1,0 +1,179 @@
+[
+  {
+    "name": "new_cve_detected",
+    "current": [
+      {
+        "instance_id": "00000000-0000-0000-0000-000000000001",
+        "advisory_id": "CVE-2024-001",
+        "package_name": "lodash",
+        "package_version": "4.17.20",
+        "ecosystem": "npm",
+        "decree_score": 8.5,
+        "severity": "high"
+      }
+    ],
+    "previous": [],
+    "exploits": {},
+    "prev_exploits": {},
+    "expected": [
+      {"kind": "new_cve", "advisory_id": "CVE-2024-001"}
+    ]
+  },
+  {
+    "name": "resolved_cve",
+    "current": [],
+    "previous": [
+      {
+        "instance_id": "00000000-0000-0000-0000-000000000002",
+        "advisory_id": "CVE-2024-002",
+        "package_name": "express",
+        "package_version": "4.17.1",
+        "ecosystem": "npm",
+        "decree_score": 6.0,
+        "severity": "medium"
+      }
+    ],
+    "exploits": {},
+    "prev_exploits": {},
+    "expected": [
+      {"kind": "resolved_cve", "advisory_id": "CVE-2024-002"}
+    ]
+  },
+  {
+    "name": "score_change_significant",
+    "current": [
+      {
+        "instance_id": "00000000-0000-0000-0000-000000000003",
+        "advisory_id": "CVE-2024-003",
+        "package_name": "axios",
+        "package_version": "0.21.1",
+        "ecosystem": "npm",
+        "decree_score": 9.0,
+        "severity": "critical"
+      }
+    ],
+    "previous": [
+      {
+        "instance_id": "00000000-0000-0000-0000-000000000003",
+        "advisory_id": "CVE-2024-003",
+        "package_name": "axios",
+        "package_version": "0.21.1",
+        "ecosystem": "npm",
+        "decree_score": 7.0,
+        "severity": "high"
+      }
+    ],
+    "exploits": {},
+    "prev_exploits": {},
+    "expected": [
+      {"kind": "score_change", "advisory_id": "CVE-2024-003"}
+    ]
+  },
+  {
+    "name": "score_change_insignificant",
+    "current": [
+      {
+        "instance_id": "00000000-0000-0000-0000-000000000004",
+        "advisory_id": "CVE-2024-004",
+        "package_name": "react",
+        "package_version": "17.0.2",
+        "ecosystem": "npm",
+        "decree_score": 5.3,
+        "severity": "medium"
+      }
+    ],
+    "previous": [
+      {
+        "instance_id": "00000000-0000-0000-0000-000000000004",
+        "advisory_id": "CVE-2024-004",
+        "package_name": "react",
+        "package_version": "17.0.2",
+        "ecosystem": "npm",
+        "decree_score": 5.1,
+        "severity": "medium"
+      }
+    ],
+    "exploits": {},
+    "prev_exploits": {},
+    "expected": []
+  },
+  {
+    "name": "new_exploit_for_existing_cve",
+    "current": [
+      {
+        "instance_id": "00000000-0000-0000-0000-000000000005",
+        "advisory_id": "CVE-2024-005",
+        "package_name": "openssl",
+        "package_version": "1.1.1k",
+        "ecosystem": "deb",
+        "decree_score": 7.5,
+        "severity": "high"
+      }
+    ],
+    "previous": [
+      {
+        "instance_id": "00000000-0000-0000-0000-000000000005",
+        "advisory_id": "CVE-2024-005",
+        "package_name": "openssl",
+        "package_version": "1.1.1k",
+        "ecosystem": "deb",
+        "decree_score": 7.5,
+        "severity": "high"
+      }
+    ],
+    "exploits": {"CVE-2024-005": true},
+    "prev_exploits": {},
+    "expected": [
+      {"kind": "new_exploit", "advisory_id": "CVE-2024-005"}
+    ]
+  },
+  {
+    "name": "mixed_changes",
+    "current": [
+      {
+        "instance_id": "00000000-0000-0000-0000-000000000010",
+        "advisory_id": "CVE-2024-010",
+        "package_name": "flask",
+        "package_version": "2.0.0",
+        "ecosystem": "pip",
+        "decree_score": 8.0,
+        "severity": "high"
+      },
+      {
+        "instance_id": "00000000-0000-0000-0000-000000000012",
+        "advisory_id": "CVE-2024-012",
+        "package_name": "django",
+        "package_version": "3.2.0",
+        "ecosystem": "pip",
+        "decree_score": 9.5,
+        "severity": "critical"
+      }
+    ],
+    "previous": [
+      {
+        "instance_id": "00000000-0000-0000-0000-000000000010",
+        "advisory_id": "CVE-2024-010",
+        "package_name": "flask",
+        "package_version": "2.0.0",
+        "ecosystem": "pip",
+        "decree_score": 8.0,
+        "severity": "high"
+      },
+      {
+        "instance_id": "00000000-0000-0000-0000-000000000011",
+        "advisory_id": "CVE-2024-011",
+        "package_name": "requests",
+        "package_version": "2.25.0",
+        "ecosystem": "pip",
+        "decree_score": 5.0,
+        "severity": "medium"
+      }
+    ],
+    "exploits": {},
+    "prev_exploits": {},
+    "expected": [
+      {"kind": "new_cve", "advisory_id": "CVE-2024-012"},
+      {"kind": "resolved_cve", "advisory_id": "CVE-2024-011"}
+    ]
+  }
+]
