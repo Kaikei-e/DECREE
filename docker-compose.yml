@@ -1,0 +1,170 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: decree
+      POSTGRES_USER: decree
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - decree-pgdata:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U decree"]
+      interval: 5s
+      retries: 5
+    networks:
+      - decree-net
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - decree-redis:/data
+    ports:
+      - "6381:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+    networks:
+      - decree-net
+
+  decree-migrate:
+    image: arigaio/atlas:latest
+    command:
+      - migrate
+      - apply
+      - --dir
+      - file:///db/migrations
+      - --url
+      - postgresql://decree:decree@postgres:5432/decree?sslmode=disable
+    volumes:
+      - ./db:/db:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - decree-net
+
+  redis-init:
+    image: redis:7-alpine
+    entrypoint: /scripts/init-redis.sh
+    environment:
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - ./scripts:/scripts:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - decree-net
+
+  decree-scanner:
+    build:
+      context: .
+      dockerfile: services/scanner/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://decree:decree@postgres:5432/decree
+      REDIS_URL: redis://redis:6379
+    secrets:
+      - nvd_api_key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9000/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - decree-net
+
+  decree-oracle:
+    build: ./services/oracle
+    environment:
+      DATABASE_URL: postgresql://decree:decree@postgres:5432/decree
+      REDIS_URL: redis://redis:6379
+      DECREE_CONFIG: /etc/decree/decree.yaml
+    secrets:
+      - slack_webhook_url
+      - discord_webhook_url
+    volumes:
+      - ./decree.yaml:/etc/decree/decree.yaml:ro
+    depends_on:
+      decree-scanner:
+        condition: service_healthy
+      decree-migrate:
+        condition: service_completed_successfully
+      redis-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9100/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - decree-net
+
+  decree-gateway:
+    build: ./services/gateway
+    ports:
+      - "8400:8400"
+    environment:
+      DATABASE_URL: postgresql://decree:decree@postgres:5432/decree
+      REDIS_URL: redis://redis:6379
+    secrets:
+      - decree_webhook_token
+    depends_on:
+      decree-oracle:
+        condition: service_healthy
+      decree-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8400/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - decree-net
+
+  decree-eye:
+    build: ./services/eye
+    ports:
+      - "3400:3400"
+    environment:
+      VITE_API_URL: http://localhost:8400
+    depends_on:
+      decree-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3400/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - decree-net
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+  nvd_api_key:
+    file: ./secrets/nvd_api_key.txt
+  slack_webhook_url:
+    file: ./secrets/slack_webhook_url.txt
+  discord_webhook_url:
+    file: ./secrets/discord_webhook_url.txt
+  decree_webhook_token:
+    file: ./secrets/decree_webhook_token.txt
+
+volumes:
+  decree-pgdata:
+  decree-redis:
+
+networks:
+  decree-net:
+    driver: bridge

@@ -1,0 +1,49 @@
+project:
+  name: "example"
+
+targets:
+  repositories:
+    - name: example-api
+      url: https://github.com/example/example-api
+      branch: main
+
+    - name: example-web
+      url: https://github.com/example/example-web
+      branch: main
+
+  containers:
+    - name: example-api
+      image: ghcr.io/example/example-api:latest
+
+scan:
+  interval: 10m
+  initial_scan: true
+
+  vulnerability_refresh:
+    epss: 24h
+    osv: 1h
+    nvd: 6h
+
+diff:
+  enabled: true
+  track:
+    - new_cve
+    - resolved_cve
+    - score_change
+    - new_exploit
+
+notify:
+  slack:
+    webhook_url: ${DECREE_SLACK_WEBHOOK}
+    severity_threshold: high
+    include_decree_score: true
+
+  discord:
+    webhook_url: ${DECREE_DISCORD_WEBHOOK}
+    severity_threshold: critical
+
+  webhook:
+    url: ${DECREE_GENERIC_WEBHOOK}
+    method: POST
+    headers:
+      Authorization: "Bearer ${DECREE_WEBHOOK_TOKEN}"
