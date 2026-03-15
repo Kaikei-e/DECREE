@@ -204,6 +204,36 @@ func TestListTimeline(t *testing.T) {
 	}
 }
 
+func TestSSEThroughMiddleware(t *testing.T) {
+	broker := sse.NewBroker()
+	router := NewRouter(&mockStore{}, broker)
+
+	req := httptest.NewRequest("GET", "/api/events?project_id=test", nil)
+	// Use a context with cancel so the SSE handler terminates.
+	ctx, cancel := context.WithCancel(req.Context())
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		router.ServeHTTP(w, req)
+	}()
+
+	// Give the handler a moment to write headers, then cancel.
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+	ct := w.Header().Get("Content-Type")
+	if ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", ct)
+	}
+}
+
 func TestCORSHeaders(t *testing.T) {
 	router := NewRouter(&mockStore{projects: []db.Project{}}, sse.NewBroker())
 	req := httptest.NewRequest("GET", "/api/projects", nil)
