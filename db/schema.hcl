@@ -631,6 +631,100 @@ table "exploit_source_items" {
   }
 }
 
+// ============================================================
+// M3 tables
+// ============================================================
+
+table "job_leases" {
+  schema = schema.public
+  column "target_id" {
+    type = uuid
+  }
+  column "holder_id" {
+    type = text
+    null = false
+  }
+  column "acquired_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  column "expires_at" {
+    type = timestamptz
+    null = false
+  }
+  column "job_id" {
+    type = uuid
+  }
+  primary_key {
+    columns = [column.target_id]
+  }
+  foreign_key "fk_target" {
+    columns     = [column.target_id]
+    ref_columns = [table.targets.column.id]
+    on_delete   = CASCADE
+  }
+}
+
+table "notification_delivery_log" {
+  schema = schema.public
+  column "id" {
+    type    = uuid
+    default = sql("gen_random_uuid()")
+  }
+  column "target_id" {
+    type = uuid
+    null = false
+  }
+  column "advisory_id" {
+    type = text
+    null = false
+  }
+  column "diff_kind" {
+    type = text
+    null = false
+  }
+  column "channel" {
+    type = text
+    null = false
+  }
+  column "status" {
+    type = text
+    null = false
+  }
+  column "attempts" {
+    type    = integer
+    null    = false
+    default = 0
+  }
+  column "last_attempt_at" {
+    type = timestamptz
+  }
+  column "delivered_at" {
+    type = timestamptz
+  }
+  column "dedup_key" {
+    type = text
+    null = false
+  }
+  column "created_at" {
+    type    = timestamptz
+    null    = false
+    default = sql("now()")
+  }
+  primary_key {
+    columns = [column.id]
+  }
+  foreign_key "fk_target" {
+    columns     = [column.target_id]
+    ref_columns = [table.targets.column.id]
+  }
+  index "idx_delivery_dedup" {
+    columns = [column.dedup_key, column.channel]
+    unique  = true
+  }
+}
+
 table "exploit_cve_links" {
   schema = schema.public
   column "id" {
