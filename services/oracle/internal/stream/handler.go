@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/Kaikei-e/decree/services/oracle/internal/diff"
-	"github.com/Kaikei-e/decree/services/oracle/internal/notify"
+	"decree/services/oracle/internal/diff"
+	"decree/services/oracle/internal/notify"
 )
 
 // ScanEvent represents a scan-events stream message payload.

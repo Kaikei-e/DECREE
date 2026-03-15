@@ -11,9 +11,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/Kaikei-e/decree/services/oracle/internal/config"
-	"github.com/Kaikei-e/decree/services/oracle/internal/db"
-	"github.com/Kaikei-e/decree/services/oracle/internal/scanner"
+	"decree/services/oracle/internal/config"
+	"decree/services/oracle/internal/db"
+	"decree/services/oracle/internal/scanner"
 )
 
 func db_target(name string) db.Target {

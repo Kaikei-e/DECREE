@@ -1,49 +1,49 @@
 package scanner
 
 // Request/response types matching proto/scanner/v1/scanner.proto.
-// Used directly for Connect-RPC JSON encoding.
+// JSON tags use camelCase to match Connect-RPC/pbjson convention.
 
 type RunScanRequest struct {
-	TargetID string `json:"target_id,omitempty"`
+	TargetID string `json:"targetId,omitempty"`
 }
 
 type RunScanResponse struct {
-	ScanID string `json:"scan_id,omitempty"`
+	ScanID string `json:"scanId,omitempty"`
 	Status string `json:"status,omitempty"`
 }
 
 type GetScanStatusRequest struct {
-	ScanID string `json:"scan_id,omitempty"`
+	ScanID string `json:"scanId,omitempty"`
 }
 
 type GetScanStatusResponse struct {
-	ScanID       string `json:"scan_id,omitempty"`
+	ScanID       string `json:"scanId,omitempty"`
 	Status       string `json:"status,omitempty"`
-	StartedAt    string `json:"started_at,omitempty"`
-	CompletedAt  string `json:"completed_at,omitempty"`
-	ErrorMessage string `json:"error_message,omitempty"`
+	StartedAt    string `json:"startedAt,omitempty"`
+	CompletedAt  string `json:"completedAt,omitempty"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 
 type SyncEpssRequest struct{}
 type SyncEpssResponse struct {
-	SyncedCount uint32 `json:"synced_count,omitempty"`
+	SyncedCount uint32 `json:"syncedCount,omitempty"`
 }
 
 type SyncNvdRequest struct{}
 type SyncNvdResponse struct {
-	SyncedCount uint32 `json:"synced_count,omitempty"`
+	SyncedCount uint32 `json:"syncedCount,omitempty"`
 }
 
 type SyncExploitDbRequest struct{}
 type SyncExploitDbResponse struct {
-	ExploitsSynced uint32 `json:"exploits_synced,omitempty"`
-	LinksSynced    uint32 `json:"links_synced,omitempty"`
+	ExploitsSynced uint32 `json:"exploitsSynced,omitempty"`
+	LinksSynced    uint32 `json:"linksSynced,omitempty"`
 }
 
 type RecalculateScoresRequest struct {
-	CVEIDs []string `json:"cve_ids,omitempty"`
+	CVEIDs []string `json:"cveIds,omitempty"`
 }
 
 type RecalculateScoresResponse struct {
-	UpdatedCount uint32 `json:"updated_count,omitempty"`
+	UpdatedCount uint32 `json:"updatedCount,omitempty"`
 }
