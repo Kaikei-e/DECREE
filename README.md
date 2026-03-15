@@ -2,26 +2,30 @@
 
 **Dynamic Realtime Exploit Classification & Evaluation Engine**
 
-DECREE is a platform for continuously detecting and evaluating vulnerabilities in software and container dependencies, with an emphasis on practical risk rather than raw severity alone.  
-Instead of replacing existing scanners outright, DECREE builds on SBOM generation and vulnerability matching, then focuses on classification, scoring, change detection, and visualization.
+DECREE is a multi-service vulnerability analysis platform focused on one question: not just "is this package vulnerable?", but "how much should we care right now?"
 
-## What DECREE Aims To Do
+It combines SBOM-based scanning, vulnerability enrichment, score calculation, diff detection, event streaming, and visualization. Rather than trying to be another all-in-one scanner, DECREE builds on existing inputs and emphasizes prioritization, change tracking, and operator-facing visibility.
 
-- Continuously track vulnerabilities across dependencies
-- Prioritize findings using CVSS plus exploitability and reachability signals
-- Detect meaningful changes between scans
-- Make those changes easier to understand through notifications and UI surfaces
+## What DECREE Does
+
+- Scans software supply chain targets and stores normalized findings
+- Enriches findings with OSV, EPSS, NVD, and Exploit-DB data
+- Computes a custom DECREE Score from severity, exploitability, and reachability
+- Detects changes between scans such as new CVEs, resolved CVEs, score shifts, and newly linked exploits
+- Publishes change events over Redis Streams and SSE
+- Exposes project, target, finding, and timeline data over an HTTP API
+- Includes a frontend for project selection, finding visualization, and finding detail inspection
 
 ## Current Status
 
-This repository already runs as a multi-service system, but it is still evolving. As of today, the codebase primarily includes:
+This repository is no longer just a skeleton. The codebase now includes:
 
-- `scanner`: SBOM-based analysis, OSV matching, EPSS/NVD/Exploit-DB enrichment, DECREE Score calculation
-- `oracle`: scheduled scans, diff detection, Slack / Discord / generic webhook notifications
-- `gateway`: HTTP entrypoint foundation and health checks
-- `eye`: frontend foundation and health checks
+- `scanner` in Rust: target adapters, SBOM ingestion/generation, OSV matching, enrichment RPCs, outbox publishing
+- `oracle` in Go: config seeding, scheduled scans, score refresh, diff detection, notification routing
+- `gateway` in Go: REST API, paginated findings/timeline endpoints, SSE fan-out, PostgreSQL-backed queries
+- `eye` in SvelteKit: project list, graph visualization, filters, detail drawer, renderer switching, timeline controls
 
-At the same time, the public-facing REST API and the richer end-user UI are still in an early stage. This README only documents behavior that is supported by the current codebase.
+There are still a few unfinished edges, but the core service integration is now largely aligned. This README reflects the code as it exists today, including the limitations that still matter for first-time users.
 
 ## Architecture
 
@@ -34,57 +38,86 @@ flowchart LR
     postgres[("PostgreSQL 17")]
     redis[("Redis 7")]
 
-    scanner --> oracle
-    oracle -->|Redis Streams| redis
-    eye --> gateway
-    scanner --- postgres
-    oracle --- postgres
-    gateway --- postgres
-    scanner --- redis
-    oracle --- redis
-    gateway --- redis
+    scanner <-->|Connect-RPC| oracle
+    scanner -->|outbox events| redis
+    oracle -->|diff + notify events| redis
+    gateway -->|REST + SSE| eye
+    gateway -->|read models| postgres
+    scanner -->|findings + observations| postgres
+    oracle -->|scheduling + diff state| postgres
+    gateway <-->|Redis Streams consumer| redis
+    oracle <-->|Redis Streams consumer| redis
 ```
 
 | Service | Tech | Port | Responsibility |
 |---|---|---:|---|
-| `decree-scanner` | Rust | `9000` internal | Runs scans, materializes/parses SBOMs, enriches findings with OSV/EPSS/NVD/Exploit-DB, computes scores |
-| `decree-oracle` | Go | `9100` internal | Manages targets, scheduling, diff detection, and notifications |
-| `decree-gateway` | Go | `8400` | Public HTTP entrypoint |
-| `decree-eye` | SvelteKit | `3400` | Frontend |
-| PostgreSQL | - | `5434` host | Persistent storage |
-| Redis | - | `6381` host | Streams and event delivery |
+| `decree-scanner` | Rust | `9000` internal | Runs scans, materializes/parses SBOMs, matches OSV advisories, syncs EPSS/NVD/Exploit-DB data, recalculates scores |
+| `decree-oracle` | Go | `9100` internal | Seeds configured targets, schedules scans, detects diffs, dispatches notifications |
+| `decree-gateway` | Go | `8400` | Exposes REST endpoints and SSE over the read model |
+| `decree-eye` | SvelteKit + Three.js | `3400` | Project browser and vulnerability visualization UI |
+| PostgreSQL | - | `5434` host | Persistent store for scans, observations, projections, notifications |
+| Redis | - | `6381` host | Streams for scan/finding/notification events |
 
-## Key Features
+## Implemented Features
 
-- Define Git repositories and container images as scan targets
-- Generate and ingest SBOMs with Syft
-- Match vulnerabilities through OSV
-- Enrich findings with EPSS, NVD, and Exploit-DB data
-- Compute a custom score based on `CVSS + EPSS + Reachability`
-- Detect changes between scan results
-- Send notifications to Slack, Discord, or an arbitrary webhook
-- Run the full stack locally with Docker Compose
+### Scanning and enrichment
+
+- Container image scanning via Syft
+- Internal support for Git, container, and raw SBOM target adapters in `scanner`
+- OSV batch matching against normalized packages
+- EPSS synchronization
+- NVD synchronization
+- Exploit-DB synchronization
+- Score recalculation for active findings
+
+### Diffing and notifications
+
+- Initial scan seeding from `decree.yaml`
+- Scheduled rescans at a configurable interval
+- Diff detection for:
+  - `new_cve`
+  - `resolved_cve`
+  - `score_change`
+  - `new_exploit`
+- Slack notifications
+- Discord notifications
+- Generic webhook notifications
+- Notification deduplication and delivery logging
+
+### Read API and UI
+
+- Project listing
+- Target listing
+- Paginated findings API with filters
+- Finding detail API with fix versions, exploit refs, and dependency edges
+- Top risks API
+- Timeline API
+- SSE endpoint for live finding/notification updates
+- Graph-based project view in `eye`
+- 3D renderer with 2D fallback
+- Filter controls for severity, ecosystem, EPSS, and active-only findings
+- Detail panel for remediation and exploit context
 
 ## DECREE Score
 
-DECREE Score is designed to reflect not only severity, but also exploit likelihood and how reachable a dependency is in practice.
+The current implementation uses:
 
 ```text
 DECREE Score = (CVSS_base × 0.4) + (EPSS × 100 × 0.35) + (Reachability × 0.25)
 ```
 
-This formula reflects the current implementation and may evolve over time.
+This is implementation state, not a long-term compatibility promise.
 
 ## Quick Start
 
 ### 1. Prerequisites
 
-At minimum, you need:
+Required:
 
 - Docker
 - Docker Compose
 
-For local development, you will also want:
+For local development:
 
 - Rust toolchain
 - Go
@@ -99,9 +132,9 @@ git clone https://github.com/Kaikei-e/DECREE.git
 cd DECREE
 ```
 
-### 3. Create the required secrets
+### 3. Create required secret files
 
-Docker Compose reads secret values from files under `secrets/`. Some of them may be empty, but the files themselves must exist.
+Docker Compose expects these files to exist under `secrets/`, even if some values are empty.
 
 ```bash
 mkdir -p secrets
@@ -116,28 +149,32 @@ touch secrets/decree_webhook_token.txt
 Notes:
 
 - `postgres_password.txt` is required
-- `nvd_api_key.txt` is optional, but recommended if you want more reliable NVD syncs
-- If you do not use notifications yet, the webhook-related files can remain empty
+- `nvd_api_key.txt` is optional but recommended for more reliable NVD sync
+- notification-related files may be left empty if you are not using those channels yet
 
-### 4. Configure your scan targets
+### 4. Configure targets
 
-Define repositories and container images in [`decree.yaml`](/home/ice/dev/DECREE/decree.yaml). The default file contains placeholder examples. If you leave it unchanged, DECREE will try to scan `example/*` targets, so update it before real use.
+DECREE reads runtime targets from `decree.yaml`.
 
-Example:
+You can start with repositories, container images, or both. A minimal example:
 
 ```yaml
 project:
-  name: "my-project"
+  name: "demo"
 
 targets:
   repositories:
-    - name: app
-      url: https://github.com/your-org/your-repo
+    - name: decree
+      url: https://github.com/Kaikei-e/DECREE.git
       branch: main
 
   containers:
-    - name: app-image
-      image: ghcr.io/your-org/your-image:latest
+    - name: nginx
+      image: nginx:latest
+
+scan:
+  interval: 10m
+  initial_scan: true
 ```
 
 ### 5. Start the stack
@@ -146,9 +183,16 @@ targets:
 docker compose up --build -d
 ```
 
-On first startup, this will build service images, apply database migrations, and initialize Redis Streams, so it may take a little while.
+On a fresh start this will:
 
-### 6. Verify that it is running
+- start PostgreSQL and Redis
+- apply Atlas migrations
+- initialize Redis consumer groups
+- build and start the DECREE services
+- seed configured targets
+- trigger initial scans if `scan.initial_scan: true`
+
+### 6. Verify health
 
 ```bash
 docker compose ps
@@ -158,33 +202,128 @@ curl http://localhost:3400/healthz
 
 Useful URLs:
 
-- UI: `http://localhost:3400`
-- Gateway health check: `http://localhost:8400/healthz`
+- Gateway health: `http://localhost:8400/healthz`
+- Eye health: `http://localhost:3400/healthz`
+- Eye UI entrypoint: `http://localhost:3400`
+
+### 7. Query the API directly
+
+The gateway is currently the most trustworthy user-facing surface because its route contract is explicit in the code.
+
+List projects:
+
+```bash
+curl http://localhost:8400/api/projects
+```
+
+List targets for a project:
+
+```bash
+curl http://localhost:8400/api/projects/<project-id>/targets
+```
+
+List active findings:
+
+```bash
+curl "http://localhost:8400/api/projects/<project-id>/findings?active_only=true&limit=20"
+```
+
+Top risks:
+
+```bash
+curl "http://localhost:8400/api/projects/<project-id>/top-risks?limit=10"
+```
+
+Timeline:
+
+```bash
+curl "http://localhost:8400/api/projects/<project-id>/timeline?limit=50"
+```
+
+Live events:
+
+```bash
+curl -N http://localhost:8400/api/events
+```
+
+## API Surface
+
+The current gateway routes are:
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/healthz` | health check |
+| `GET` | `/api/projects` | list projects |
+| `GET` | `/api/projects/{id}/targets` | list targets for a project |
+| `GET` | `/api/projects/{id}/findings` | paginated findings with filters |
+| `GET` | `/api/findings/{instance_id}` | finding detail |
+| `GET` | `/api/projects/{id}/top-risks` | highest-score active findings |
+| `GET` | `/api/projects/{id}/timeline` | observed/disappeared events |
+| `GET` | `/api/events` | SSE stream |
+
+Supported findings query params:
+
+- `active_only=true|false`
+- `severity=<label>`
+- `ecosystem=<name>`
+- `min_epss=<float>`
+- `limit=<n>`
+- `cursor=<opaque>`
+
+Supported timeline query params:
+
+- `target_id=<uuid>`
+- `event_type=observed|disappeared`
+- `from=<rfc3339>`
+- `to=<rfc3339>`
+- `limit=<n>`
+- `cursor=<opaque>`
+
+Response shapes:
+
+- list endpoints generally return `{ "data": [...] }`
+- paginated endpoints return `{ "data": [...], "has_more": bool, "next_cursor": "..." }`
+- errors return `{ "error": { "code": "...", "message": "..." } }`
+
+## Internal Scanner RPC Surface
+
+`decree-oracle` talks to `decree-scanner` over JSON/HTTP Connect-style RPC routes:
+
+- `/scanner.v1.ScannerService/RunScan`
+- `/scanner.v1.ScannerService/GetScanStatus`
+- `/scanner.v1.EnrichmentService/SyncEpss`
+- `/scanner.v1.EnrichmentService/SyncNvd`
+- `/scanner.v1.EnrichmentService/SyncExploitDb`
+- `/scanner.v1.EnrichmentService/RecalculateScores`
+
+These are internal service endpoints, but they are useful to know when tracing behavior across the system.
 
 ## Configuration
 
 ### `decree.yaml`
 
-[`decree.yaml`](/home/ice/dev/DECREE/decree.yaml) is the main runtime configuration file. It defines:
+`decree.yaml` defines:
 
 - project name
-- repositories to monitor
-- container images to monitor
+- repositories and containers to seed as targets
 - scan interval
-- vulnerability refresh intervals
-- diff tracking behavior
-- notification channels
+- initial scan behavior
+- enrichment refresh cadence
+- diff tracking settings
+- notification channel config
 
 Important fields:
 
-- `scan.interval`: how often scheduled scans run
-- `scan.initial_scan`: whether to run an initial scan on startup
-- `scan.vulnerability_refresh`: refresh cadence for EPSS / OSV / NVD related data
-- `diff.track`: which changes to detect, such as `new_cve`, `resolved_cve`, `score_change`, and `new_exploit`
+- `scan.interval`: scheduler scan interval
+- `scan.initial_scan`: whether startup triggers scans immediately
+- `scan.vulnerability_refresh.epss`: EPSS refresh cadence
+- `scan.vulnerability_refresh.nvd`: NVD refresh cadence
+- `scan.vulnerability_refresh.osv`: present in config, though scanner-side refresh behavior is currently centered on EPSS/NVD/Exploit-DB RPCs
+- `diff.track`: includes values such as `new_cve`, `resolved_cve`, `score_change`, `new_exploit`
 
 ### Secrets
 
-Notification endpoints and external credentials are loaded through Docker secrets.
+The following files are wired into Docker Compose:
 
 | File | Purpose |
 |---|---|
@@ -192,11 +331,11 @@ Notification endpoints and external credentials are loaded through Docker secret
 | `secrets/nvd_api_key.txt` | NVD API key |
 | `secrets/slack_webhook_url.txt` | Slack webhook URL |
 | `secrets/discord_webhook_url.txt` | Discord webhook URL |
-| `secrets/decree_webhook_token.txt` | Generic webhook auth token |
+| `secrets/decree_webhook_token.txt` | generic webhook auth token |
 
 ## Local Development
 
-### Service-by-service development
+### Service-by-service
 
 ```bash
 # scanner
@@ -218,9 +357,10 @@ go test ./...
 cd services/eye
 pnpm install
 pnpm run dev
+pnpm test
 ```
 
-### Makefile targets
+### Make targets
 
 ```bash
 make up          # docker compose up -d
@@ -228,10 +368,10 @@ make down        # docker compose down
 make build       # docker compose build
 make proto       # buf generate
 make migrate     # atlas migrate apply --env docker
-make lint        # lint / vet across services
-make test        # run service tests
+make lint        # buf lint + clippy + go vet + biome
+make test        # cargo test + go test + vitest
 make fmt         # format source code
-make fmt-check   # verify formatting
+make fmt-check   # verify Go/Rust formatting
 ```
 
 ## Repository Layout
@@ -239,25 +379,24 @@ make fmt-check   # verify formatting
 ```text
 .
 ├── db/                  # schema and migrations
-├── proto/               # Connect-RPC / Protobuf definitions
+├── proto/               # scanner RPC schema
 ├── services/
-│   ├── scanner/         # Rust scanner
-│   ├── oracle/          # Go scheduler / diff / notifications
-│   ├── gateway/         # Go HTTP gateway
-│   └── eye/             # SvelteKit frontend
-├── scripts/             # helper scripts
-├── decree.yaml          # runtime target and behavior config
-└── docker-compose.yml   # local stack definition
+│   ├── scanner/         # scan pipeline and enrichment
+│   ├── oracle/          # scheduler, diff engine, notifications
+│   ├── gateway/         # read API and SSE
+│   └── eye/             # visualization UI
+├── scripts/             # helper scripts such as Redis init
+├── decree.yaml          # runtime target and scheduler config
+└── docker-compose.yml   # local stack
 ```
 
-## Common Gotchas
+## Known Limitations
 
-- Docker Compose will fail if the `secrets/...` files do not exist
-- Leaving the sample values in `decree.yaml` will make DECREE try to scan placeholder targets
-- `scanner` uses Syft at runtime; the Docker image includes it, but local runs need the dependency installed
-- External data sync depends on network access and upstream API limits
-- `gateway` and `eye` are still foundational, so end-user functionality is currently limited
+These are not hypothetical. They follow directly from the current source tree.
+
+- Timeline controls and timeline state exist in the frontend, but the full end-to-end timeline replay flow is still only partially wired.
+- There is no shipped `decree` CLI in the current source tree despite M6 planning notes mentioning one.
 
 ## License
 
-Apache License 2.0. See [`LICENSE`](/home/ice/dev/DECREE/LICENSE) for details.
+Apache License 2.0. See `LICENSE` for details.
