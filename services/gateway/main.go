@@ -9,21 +9,69 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Kaikei-e/decree/services/gateway/internal/health"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/Kaikei-e/decree/services/gateway/internal/api"
+	"github.com/Kaikei-e/decree/services/gateway/internal/config"
+	"github.com/Kaikei-e/decree/services/gateway/internal/db"
+	"github.com/Kaikei-e/decree/services/gateway/internal/sse"
 )
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", health.Handler)
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("config load failed", "error", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Database
+	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		slog.Error("database connection failed", "error", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+
+	store := db.NewPgStore(pool)
+
+	// Redis
+	opts, err := redis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		slog.Error("redis url parse failed", "error", err)
+		os.Exit(1)
+	}
+	rdb := redis.NewClient(opts)
+	defer rdb.Close()
+
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		slog.Error("redis ping failed", "error", err)
+		os.Exit(1)
+	}
+
+	// SSE
+	broker := sse.NewBroker()
+	consumer := sse.NewConsumer(rdb, broker)
+
+	go func() {
+		if err := consumer.Run(ctx); err != nil {
+			slog.Error("sse consumer failed", "error", err)
+		}
+	}()
+
+	// Router
+	handler := api.NewRouter(store, broker)
 
 	srv := &http.Server{
-		Addr:         ":8400",
-		Handler:      mux,
+		Addr:         cfg.Port,
+		Handler:      handler,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
@@ -40,10 +88,13 @@ func main() {
 	sig := <-quit
 	slog.Info("shutting down", "signal", sig.String())
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	// Cancel context to stop consumer
+	cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown error", "error", err)
 		os.Exit(1)
 	}
