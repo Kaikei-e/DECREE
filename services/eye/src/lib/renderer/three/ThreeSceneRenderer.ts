@@ -35,7 +35,7 @@ export class ThreeSceneRenderer implements SceneRenderer {
 		this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
 		this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 		this.renderer.setSize(container.clientWidth, container.clientHeight);
-		this.renderer.setClearColor(0x0a0a0f, 1);
+		this.renderer.setClearColor(0x050a0e, 1);
 		container.appendChild(this.renderer.domElement);
 
 		this.camera.aspect = container.clientWidth / container.clientHeight;
@@ -109,11 +109,15 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	}
 
 	private setupLights() {
-		const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+		const ambient = new THREE.AmbientLight(0xffffff, 0.4);
 		this.scene.add(ambient);
 		const directional = new THREE.DirectionalLight(0xffffff, 0.8);
 		directional.position.set(10, 20, 10);
 		this.scene.add(directional);
+
+		// HUD grid floor
+		const grid = new THREE.GridHelper(200, 40, 0x0a2030, 0x061520);
+		this.scene.add(grid);
 	}
 
 	private setupEvents(container: HTMLElement) {

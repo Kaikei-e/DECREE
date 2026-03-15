@@ -16,8 +16,8 @@ export function createNodeMaterial(): THREE.MeshStandardMaterial {
 
 export function createEdgeMaterial(): THREE.LineBasicMaterial {
 	return new THREE.LineBasicMaterial({
-		color: 0x444444,
+		color: 0x0a3050,
 		transparent: true,
-		opacity: 0.3,
+		opacity: 0.15,
 	});
 }

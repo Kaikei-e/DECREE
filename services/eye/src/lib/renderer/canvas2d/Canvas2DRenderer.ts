@@ -137,7 +137,7 @@ export class Canvas2DRenderer implements SceneRenderer {
 		ctx.save();
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		ctx.clearRect(0, 0, w, h);
-		ctx.fillStyle = '#0a0a0f';
+		ctx.fillStyle = '#050a0e';
 		ctx.fillRect(0, 0, w, h);
 
 		if (!this.graph) {
@@ -146,7 +146,7 @@ export class Canvas2DRenderer implements SceneRenderer {
 		}
 
 		// Draw edges
-		ctx.strokeStyle = 'rgba(68, 68, 68, 0.3)';
+		ctx.strokeStyle = 'rgba(0, 229, 255, 0.08)';
 		ctx.lineWidth = 1;
 		for (const edge of this.graph.edges) {
 			const src = this.graph.nodes.get(edge.source);
@@ -175,7 +175,7 @@ export class Canvas2DRenderer implements SceneRenderer {
 
 			// Hover highlight
 			if (node.id === this.hoveredNodeId) {
-				ctx.strokeStyle = '#ffffff';
+				ctx.strokeStyle = '#00e5ff';
 				ctx.lineWidth = 2;
 				ctx.stroke();
 			}
@@ -185,7 +185,7 @@ export class Canvas2DRenderer implements SceneRenderer {
 
 		// Draw labels for high-score nodes
 		ctx.font = LABEL_FONT;
-		ctx.fillStyle = '#cccccc';
+		ctx.fillStyle = '#7a9ab5';
 		ctx.textAlign = 'center';
 		const sortedByScore = [...nodes].sort((a, b) => b.decreeScore - a.decreeScore);
 		const labelCount = Math.min(sortedByScore.length, 15);
