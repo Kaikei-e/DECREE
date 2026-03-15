@@ -23,8 +23,8 @@ const color = $derived(colorMap[severity]);
 </script>
 
 <span
-	class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
-	style="background-color: {color}20; color: {color};"
+	class="inline-flex items-center gap-1 rounded-sm px-2 py-0.5 font-mono text-xs font-medium uppercase tracking-wider"
+	style="background-color: {color}15; color: {color}; border-left: 2px solid {color};"
 >
 	{#if icon}
 		{@const Icon = icon}
