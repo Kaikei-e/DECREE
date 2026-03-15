@@ -1,8 +1,18 @@
-<div class="min-h-screen bg-gray-950 text-gray-100 flex items-center justify-center">
+<script lang="ts">
+import { onMount } from 'svelte';
+import { goto } from '$app/navigation';
+
+onMount(() => {
+	goto('/projects');
+});
+</script>
+
+<div class="flex min-h-[80vh] items-center justify-center">
 	<div class="text-center">
-		<h1 class="text-4xl font-bold tracking-tight">DECREE Eye</h1>
-		<p class="mt-4 text-lg text-gray-400">
+		<h1 class="font-mono text-4xl font-bold tracking-wider text-hud-accent">DECREE Eye</h1>
+		<p class="mt-4 text-lg text-hud-text-secondary">
 			Dynamic Realtime Exploit Classification &amp; Evaluation Engine
 		</p>
+		<p class="mt-2 text-sm text-hud-text-muted">Redirecting to projects...</p>
 	</div>
 </div>

@@ -41,9 +41,9 @@ function formatTime(iso: string | null): string {
 }
 </script>
 
-<div class="flex items-center gap-2 rounded-lg border border-gray-800 bg-gray-900/80 px-3 py-2 backdrop-blur">
+<div class="hud-panel flex items-center gap-2 px-3 py-2 backdrop-blur bg-hud-base/80">
 	<button
-		class="rounded p-1 text-gray-400 hover:text-gray-200 disabled:opacity-30"
+		class="p-1 text-hud-text-muted hover:text-hud-accent transition-colors disabled:opacity-30"
 		onclick={() => timelineState.stepBackward()}
 		disabled={isLive}
 		title="Step back"
@@ -53,7 +53,7 @@ function formatTime(iso: string | null): string {
 
 	{#if isPlaying}
 		<button
-			class="rounded p-1 text-gray-400 hover:text-gray-200"
+			class="p-1 text-hud-text-muted hover:text-hud-accent transition-colors"
 			onclick={() => timelineState.pause()}
 			title="Pause"
 		>
@@ -61,7 +61,7 @@ function formatTime(iso: string | null): string {
 		</button>
 	{:else if timelineState.mode === 'paused'}
 		<button
-			class="rounded p-1 text-gray-400 hover:text-gray-200"
+			class="p-1 text-hud-text-muted hover:text-hud-accent transition-colors"
 			onclick={() => timelineState.resume()}
 			title="Resume"
 		>
@@ -69,7 +69,7 @@ function formatTime(iso: string | null): string {
 		</button>
 	{:else}
 		<button
-			class="rounded p-1 text-gray-400 hover:text-gray-200"
+			class="p-1 text-hud-text-muted hover:text-hud-accent transition-colors"
 			onclick={() => timelineState.startReplay(minDate)}
 			title="Replay"
 		>
@@ -78,7 +78,7 @@ function formatTime(iso: string | null): string {
 	{/if}
 
 	<button
-		class="rounded p-1 text-gray-400 hover:text-gray-200 disabled:opacity-30"
+		class="p-1 text-hud-text-muted hover:text-hud-accent transition-colors disabled:opacity-30"
 		onclick={() => timelineState.stepForward()}
 		disabled={isLive}
 		title="Step forward"
@@ -95,12 +95,12 @@ function formatTime(iso: string | null): string {
 		class="mx-2 flex-1"
 	/>
 
-	<span class="w-28 text-right text-xs text-gray-400">
+	<span class="w-28 text-right font-mono text-xs text-hud-text-muted">
 		{formatTime(timelineState.currentTime)}
 	</span>
 
 	<button
-		class="rounded px-2 py-0.5 text-xs {isLive ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}"
+		class="rounded-sm px-2 py-0.5 font-mono text-xs transition-colors {isLive ? 'hud-border-active bg-hud-accent/10 text-hud-accent hud-live-pulse' : 'bg-hud-surface text-hud-text-muted border border-hud-border hover:text-hud-accent'}"
 		onclick={() => timelineState.goLive()}
 		title="Go live"
 	>
