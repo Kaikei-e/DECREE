@@ -18,4 +18,14 @@ for STREAM in scan-events finding-events notification-events; do
     echo "Group already exists for $STREAM"
 done
 
+# Oracle diff consumer group on scan-events
+redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" XGROUP CREATE scan-events oracle-diff 0 MKSTREAM 2>/dev/null || \
+  echo "Group oracle-diff already exists for scan-events"
+
+# Gateway SSE consumer group on finding-events and notification-events
+for STREAM in finding-events notification-events; do
+  redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" XGROUP CREATE "$STREAM" gateway-sse 0 MKSTREAM 2>/dev/null || \
+    echo "Group gateway-sse already exists for $STREAM"
+done
+
 echo "Redis initialization complete."
