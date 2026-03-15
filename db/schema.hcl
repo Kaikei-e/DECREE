@@ -120,6 +120,9 @@ table "vulnerability_instances" {
     columns = [column.target_id, column.package_name, column.package_version, column.ecosystem, column.advisory_id]
     unique  = true
   }
+  index "idx_vi_target" {
+    columns = [column.target_id]
+  }
 }
 
 table "advisory_fix_versions" {
@@ -245,6 +248,9 @@ table "vulnerability_observations" {
     ref_columns = [table.scans.column.id]
     on_delete   = CASCADE
   }
+  index "idx_vo_instance_observed" {
+    columns = [column.instance_id, column.observed_at]
+  }
 }
 
 table "vulnerability_disappearances" {
@@ -278,6 +284,9 @@ table "vulnerability_disappearances" {
     columns     = [column.scan_id]
     ref_columns = [table.scans.column.id]
     on_delete   = CASCADE
+  }
+  index "idx_vd_scan_disappeared" {
+    columns = [column.scan_id, column.disappeared_at]
   }
 }
 
@@ -378,6 +387,9 @@ table "current_finding_status" {
     columns     = [column.latest_scan_id]
     ref_columns = [table.scans.column.id]
     on_delete   = CASCADE
+  }
+  index "idx_cfs_target_active_score" {
+    columns = [column.target_id, column.is_active, column.last_score]
   }
 }
 
