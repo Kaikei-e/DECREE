@@ -142,7 +142,7 @@ services:
       decree-gateway:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3400/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3400/healthz"]
       interval: 10s
       timeout: 3s
       retries: 3
