@@ -148,7 +148,7 @@ tonic 0.12 の `Routes::into_axum_router()` で gRPC サービスを axum Router
 ### Dockerfile とビルド構成の変更
 
 - `docker-compose.yml` の scanner ビルドコンテキストをリポルート（`.`）に変更。proto ファイル（`proto/scanner/v1/scanner.proto`）を Docker ビルド内で参照するため
-- builder ステージ: `rust:1-bookworm` + `protobuf-compiler`。`WORKDIR /app/services/scanner` で build.rs の `../../proto` 相対パスを維持
+- builder ステージ: `rust:1.94.0-bookworm` + `protobuf-compiler`。`WORKDIR /app/services/scanner` で build.rs の `../../proto` 相対パスを維持
 - runtime ステージ: `debian:bookworm-slim` + `git`, `curl`, Syft バイナリ
 - builder と runtime の Debian バージョンを bookworm に統一（GLIBC バージョン不一致を防止）
 
