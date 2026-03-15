@@ -1,0 +1,36 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/rust.yml"
+      - "rust-toolchain.toml"
+      - "services/scanner/**"
+      - "proto/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/rust.yml"
+      - "rust-toolchain.toml"
+      - "services/scanner/**"
+      - "proto/**"
+
+jobs:
+  scanner:
+    name: Scanner
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/scanner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.94.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/scanner
+      - run: cargo fmt --check
+      - run: cargo clippy -- -D warnings
+      - run: cargo test

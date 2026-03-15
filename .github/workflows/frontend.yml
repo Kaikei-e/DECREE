@@ -1,0 +1,35 @@
+name: Frontend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/frontend.yml"
+      - "services/eye/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/frontend.yml"
+      - "services/eye/**"
+
+jobs:
+  eye:
+    name: Eye
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/eye
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: services/eye/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec svelte-check --tsconfig ./tsconfig.json
+      - run: pnpm run lint
+      - run: pnpm test
