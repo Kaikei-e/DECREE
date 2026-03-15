@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package scanner.v1;
+
+option go_package = "github.com/Kaikei-e/decree/gen/go/scanner/v1;scannerv1";
+
+service ScannerService {
+  // RunScan triggers a scan for the given target.
+  rpc RunScan(RunScanRequest) returns (RunScanResponse);
+
+  // GetScanStatus returns the current status of a scan job.
+  rpc GetScanStatus(GetScanStatusRequest) returns (GetScanStatusResponse);
+}
+
+service EnrichmentService {
+  // SyncEpss fetches latest EPSS data for all known CVEs.
+  rpc SyncEpss(SyncEpssRequest) returns (SyncEpssResponse);
+
+  // SyncNvd fetches NVD data for CVEs missing fresh snapshots.
+  rpc SyncNvd(SyncNvdRequest) returns (SyncNvdResponse);
+
+  // SyncExploitDb updates the Exploit-DB mirror and syncs to DB.
+  rpc SyncExploitDb(SyncExploitDbRequest) returns (SyncExploitDbResponse);
+
+  // RecalculateScores recomputes DECREE scores for active findings.
+  rpc RecalculateScores(RecalculateScoresRequest) returns (RecalculateScoresResponse);
+}
+
+message RunScanRequest {
+  string target_id = 1;
+}
+
+message RunScanResponse {
+  string scan_id = 1;
+  string status = 2;
+}
+
+message GetScanStatusRequest {
+  string scan_id = 1;
+}
+
+message GetScanStatusResponse {
+  string scan_id = 1;
+  string status = 2;
+  string started_at = 3;
+  string completed_at = 4;
+  string error_message = 5;
+}
+
+message SyncEpssRequest {}
+
+message SyncEpssResponse {
+  uint32 synced_count = 1;
+}
+
+message SyncNvdRequest {}
+
+message SyncNvdResponse {
+  uint32 synced_count = 1;
+}
+
+message SyncExploitDbRequest {}
+
+message SyncExploitDbResponse {
+  uint32 exploits_synced = 1;
+  uint32 links_synced = 2;
+}
+
+message RecalculateScoresRequest {
+  // If empty, recalculate all active findings.
+  repeated string cve_ids = 1;
+}
+
+message RecalculateScoresResponse {
+  uint32 updated_count = 1;
+}
