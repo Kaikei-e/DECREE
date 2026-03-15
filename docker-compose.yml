@@ -90,9 +90,11 @@ services:
       DATABASE_URL: postgresql://decree:decree@postgres:5432/decree
       REDIS_URL: redis://redis:6379
       DECREE_CONFIG: /etc/decree/decree.yaml
+      SCANNER_URL: http://decree-scanner:9000
     secrets:
       - slack_webhook_url
       - discord_webhook_url
+      - decree_webhook_token
     volumes:
       - ./decree.yaml:/etc/decree/decree.yaml:ro
     depends_on:
