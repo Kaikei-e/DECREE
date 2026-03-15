@@ -1,2 +1,7 @@
 !docs/impl_plans
 !.claude/
+
+
+services/eye/build/
+services/eye/.svelte-kit/
+services/eye/node_modules/

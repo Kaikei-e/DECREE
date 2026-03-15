@@ -3,6 +3,13 @@ target/
 node_modules/
 dist/
 gen/
+services/scanner/target/
+services/oracle/target/
+services/gateway/target/
+services/eye/build/
+services/eye/.svelte-kit/
+services/eye/node_modules/
+
 
 # Environment & Secrets
 .env
@@ -33,4 +40,3 @@ Thumbs.db
 # Atlas
 *.sqlite
 .claude/
-services/eye/.svelte-kit/
