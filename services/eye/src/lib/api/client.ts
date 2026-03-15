@@ -26,7 +26,11 @@ export interface TimelineFilterParams {
 	limit?: number;
 }
 
-const BASE_URL = import.meta.env.VITE_GATEWAY_URL ?? 'http://localhost:8400';
+const BASE_URL = import.meta.env.VITE_GATEWAY_URL ?? import.meta.env.VITE_API_URL ?? 'http://localhost:8400';
+
+interface DataEnvelope<T> {
+	data: T;
+}
 
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {
 	const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null);
@@ -35,36 +39,46 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
 	return `?${qs.join('&')}`;
 }
 
-async function request<T>(path: string): Promise<T> {
+async function request<T>(path: string, unwrapData = true): Promise<T> {
 	const res = await fetch(`${BASE_URL}${path}`);
 	if (!res.ok) {
 		const body = (await res.json()) as ApiError;
 		throw body;
 	}
-	return res.json() as Promise<T>;
+	const body = (await res.json()) as T | DataEnvelope<T>;
+	if (
+		unwrapData &&
+		typeof body === 'object' &&
+		body !== null &&
+		'data' in body &&
+		!('has_more' in body)
+	) {
+		return (body as DataEnvelope<T>).data;
+	}
+	return body as T;
 }
 
 export class ApiClient {
 	getProjects(): Promise<Project[]> {
-		return request<Project[]>('/api/v1/projects');
+		return request<Project[]>('/api/projects');
 	}
 
 	getTargets(projectId: string): Promise<Target[]> {
-		return request<Target[]>(`/api/v1/projects/${projectId}/targets`);
+		return request<Target[]>(`/api/projects/${projectId}/targets`);
 	}
 
 	getFindings(projectId: string, params?: FindingFilterParams): Promise<PagedResponse<Finding>> {
 		const qs = buildQuery((params ?? {}) as Record<string, string | number | boolean | undefined>);
-		return request<PagedResponse<Finding>>(`/api/v1/projects/${projectId}/findings${qs}`);
+		return request<PagedResponse<Finding>>(`/api/projects/${projectId}/findings${qs}`, false);
 	}
 
 	getFindingDetail(instanceId: string): Promise<FindingDetail> {
-		return request<FindingDetail>(`/api/v1/findings/${instanceId}`);
+		return request<FindingDetail>(`/api/findings/${instanceId}`);
 	}
 
 	getTopRisks(projectId: string, limit?: number): Promise<Finding[]> {
 		const qs = buildQuery({ limit });
-		return request<Finding[]>(`/api/v1/projects/${projectId}/top-risks${qs}`);
+		return request<Finding[]>(`/api/projects/${projectId}/top-risks${qs}`);
 	}
 
 	getTimeline(
@@ -72,7 +86,7 @@ export class ApiClient {
 		params?: TimelineFilterParams,
 	): Promise<PagedResponse<TimelineEvent>> {
 		const qs = buildQuery((params ?? {}) as Record<string, string | number | boolean | undefined>);
-		return request<PagedResponse<TimelineEvent>>(`/api/v1/projects/${projectId}/timeline${qs}`);
+		return request<PagedResponse<TimelineEvent>>(`/api/projects/${projectId}/timeline${qs}`, false);
 	}
 }
 

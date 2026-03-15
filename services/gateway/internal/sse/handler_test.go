@@ -75,6 +75,40 @@ func TestHandler_EventDelivery(t *testing.T) {
 	}
 }
 
+func TestHandler_ProjectScopedDelivery(t *testing.T) {
+	broker := NewBroker()
+	handler := NewHandler(broker)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := httptest.NewRequest("GET", "/api/events?project_id=project-a", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	broker.Broadcast(Event{ID: "1-0", Type: "finding_changed", ProjectID: "project-b", Data: `{"id":"ignored"}`})
+	broker.Broadcast(Event{ID: "2-0", Type: "finding_changed", ProjectID: "project-a", Data: `{"id":"accepted"}`})
+
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+
+	body := w.Body.String()
+	if strings.Contains(body, `ignored`) {
+		t.Fatalf("received event for different project: %s", body)
+	}
+	if !strings.Contains(body, `accepted`) {
+		t.Fatalf("missing scoped event: %s", body)
+	}
+}
+
 func TestHandler_Heartbeat(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping heartbeat test in short mode")

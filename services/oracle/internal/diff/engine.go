@@ -28,6 +28,10 @@ func (e *Engine) Detect(ctx context.Context, scanID, targetID uuid.UUID) ([]Diff
 	if err != nil {
 		return nil, err
 	}
+	projectID, err := e.db.GetTargetProjectID(ctx, targetID)
+	if err != nil {
+		return nil, err
+	}
 
 	// Get current observations
 	current, err := e.db.GetCurrentObservations(ctx, scanID)
@@ -128,12 +132,19 @@ func (e *Engine) Detect(ctx context.Context, scanID, targetID uuid.UUID) ([]Diff
 	for _, evt := range events {
 		payload := map[string]any{
 			"type":            "finding." + string(evt.Kind),
+			"project_id":      projectID.String(),
 			"target_id":       evt.TargetID.String(),
+			"target_name":     evt.TargetName,
 			"scan_id":         evt.ScanID.String(),
+			"instance_id":     evt.InstanceID.String(),
 			"advisory_id":     evt.AdvisoryID,
+			"package_version": evt.PackageVersion,
+			"ecosystem":       evt.Ecosystem,
+			"is_active":       evt.Kind != DiffResolvedCVE,
 			"package_name":    evt.PackageName,
 			"severity":        evt.Severity,
 			"decree_score":    evt.DecreeScore,
+			"epss_score":      evt.EPSSScore,
 			"has_exploit":     evt.HasExploit,
 		}
 		if err := e.db.InsertOutboxEvent(ctx, "finding-events", payload); err != nil {

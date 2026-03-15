@@ -3,7 +3,8 @@ import { applyFindingUpdate } from '$lib/graph/updater';
 import type { Finding } from '$lib/types/api';
 import { appState } from './app.svelte';
 
-const GATEWAY_URL = import.meta.env.VITE_GATEWAY_URL ?? 'http://localhost:8400';
+const GATEWAY_URL =
+	import.meta.env.VITE_GATEWAY_URL ?? import.meta.env.VITE_API_URL ?? 'http://localhost:8400';
 
 function createSSEManager() {
 	let connection = $state<SSEConnection | null>(null);

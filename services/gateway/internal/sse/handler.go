@@ -38,7 +38,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	clientID, ch := h.broker.Register()
+	clientID, ch := h.broker.Register(r.URL.Query().Get("project_id"))
 	defer h.broker.Unregister(clientID)
 
 	heartbeat := time.NewTicker(heartbeatInterval)

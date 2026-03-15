@@ -26,23 +26,24 @@ describe('ApiClient', () => {
 	});
 
 	it('getProjects calls correct URL', async () => {
-		fetchSpy.mockResolvedValueOnce(jsonResponse([{ id: '1', name: 'p', created_at: '' }]));
+		fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [{ id: '1', name: 'p', created_at: '' }] }));
 		const result = await client.getProjects();
-		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/v1/projects`);
+		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/projects`);
 		expect(result).toEqual([{ id: '1', name: 'p', created_at: '' }]);
 	});
 
 	it('getTargets calls correct URL with projectId', async () => {
-		fetchSpy.mockResolvedValueOnce(jsonResponse([]));
-		await client.getTargets('proj-1');
-		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/v1/projects/proj-1/targets`);
+		fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [] }));
+		const result = await client.getTargets('proj-1');
+		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/projects/proj-1/targets`);
+		expect(result).toEqual([]);
 	});
 
 	it('getFindings calls correct URL without params', async () => {
 		const body: PagedResponse<unknown> = { data: [], has_more: false };
 		fetchSpy.mockResolvedValueOnce(jsonResponse(body));
 		await client.getFindings('proj-1');
-		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/v1/projects/proj-1/findings`);
+		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/projects/proj-1/findings`);
 	});
 
 	it('getFindings builds query string from params', async () => {
@@ -58,34 +59,39 @@ describe('ApiClient', () => {
 	it('getFindingDetail calls correct URL', async () => {
 		fetchSpy.mockResolvedValueOnce(
 			jsonResponse({
-				instance_id: 'i-1',
-				target_id: 't-1',
-				target_name: '',
-				package_name: '',
-				package_version: '',
-				ecosystem: '',
-				advisory_id: '',
-				advisory_source: '',
-				is_active: true,
-				fix_versions: [],
-				exploits: [],
-				dependency_path: [],
+				data: {
+					instance_id: 'i-1',
+					target_id: 't-1',
+					target_name: '',
+					package_name: '',
+					package_version: '',
+					ecosystem: '',
+					advisory_id: '',
+					advisory_source: '',
+					is_active: true,
+					fix_versions: [],
+					exploits: [],
+					dependency_path: [],
+				},
 			}),
 		);
-		await client.getFindingDetail('i-1');
-		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/v1/findings/i-1`);
+		const result = await client.getFindingDetail('i-1');
+		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/findings/i-1`);
+		expect(result.instance_id).toBe('i-1');
 	});
 
 	it('getTopRisks calls correct URL with optional limit', async () => {
-		fetchSpy.mockResolvedValueOnce(jsonResponse([]));
-		await client.getTopRisks('proj-1', 10);
-		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/v1/projects/proj-1/top-risks?limit=10`);
+		fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [] }));
+		const result = await client.getTopRisks('proj-1', 10);
+		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/projects/proj-1/top-risks?limit=10`);
+		expect(result).toEqual([]);
 	});
 
 	it('getTopRisks omits limit when not provided', async () => {
-		fetchSpy.mockResolvedValueOnce(jsonResponse([]));
-		await client.getTopRisks('proj-1');
-		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/v1/projects/proj-1/top-risks`);
+		fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [] }));
+		const result = await client.getTopRisks('proj-1');
+		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/projects/proj-1/top-risks`);
+		expect(result).toEqual([]);
 	});
 
 	it('getTimeline calls correct URL with params', async () => {
@@ -93,7 +99,7 @@ describe('ApiClient', () => {
 		fetchSpy.mockResolvedValueOnce(jsonResponse(body));
 		await client.getTimeline('proj-1', { target_id: 't-1', event_type: 'observed' });
 		const url = fetchSpy.mock.calls[0]?.[0] as string;
-		expect(url).toContain('/api/v1/projects/proj-1/timeline?');
+		expect(url).toContain('/api/projects/proj-1/timeline?');
 		expect(url).toContain('target_id=t-1');
 		expect(url).toContain('event_type=observed');
 	});

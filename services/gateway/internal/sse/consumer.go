@@ -2,6 +2,7 @@ package sse
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -100,11 +101,24 @@ func (c *Consumer) toEvent(stream string, msg redis.XMessage) Event {
 		data = fmt.Sprintf(`{"stream":"%s","id":"%s"}`, stream, msg.ID)
 	}
 
+	projectID := extractProjectID(data)
+
 	return Event{
-		ID:   msg.ID,
-		Type: eventType,
-		Data: data,
+		ID:        msg.ID,
+		Type:      eventType,
+		ProjectID: projectID,
+		Data:      data,
 	}
+}
+
+func extractProjectID(data string) string {
+	var payload struct {
+		ProjectID string `json:"project_id"`
+	}
+	if err := json.Unmarshal([]byte(data), &payload); err != nil {
+		return ""
+	}
+	return payload.ProjectID
 }
 
 func (c *Consumer) recoverPending(ctx context.Context, streams []string) {

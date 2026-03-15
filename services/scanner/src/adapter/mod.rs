@@ -8,7 +8,7 @@ use crate::db::models::Target;
 use crate::error::{Result, ScannerError};
 use crate::sbom::model::NormalizedSbom;
 
-/// Enum dispatch adapter — the set of target types is fixed (git, container, sbom).
+/// Enum dispatch adapter — the set of target types is fixed.
 pub enum TargetAdapter {
     Git(git::GitTargetAdapter),
     Container(container::ContainerTargetAdapter),
@@ -18,7 +18,7 @@ pub enum TargetAdapter {
 impl TargetAdapter {
     pub fn from_target(target: &Target) -> Result<Self> {
         match target.target_type.as_str() {
-            "git" => Ok(Self::Git(git::GitTargetAdapter)),
+            "git" | "repository" => Ok(Self::Git(git::GitTargetAdapter)),
             "container" => Ok(Self::Container(container::ContainerTargetAdapter)),
             "sbom" => Ok(Self::Sbom(sbom::SbomTargetAdapter)),
             other => Err(ScannerError::TargetAccess(format!(

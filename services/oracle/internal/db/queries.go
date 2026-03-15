@@ -230,6 +230,13 @@ func (d *DB) GetTargetName(ctx context.Context, targetID uuid.UUID) (string, err
 	return name, err
 }
 
+// GetTargetProjectID returns the project ID for a target.
+func (d *DB) GetTargetProjectID(ctx context.Context, targetID uuid.UUID) (uuid.UUID, error) {
+	var projectID uuid.UUID
+	err := d.Pool.QueryRow(ctx, `SELECT project_id FROM targets WHERE id = $1`, targetID).Scan(&projectID)
+	return projectID, err
+}
+
 // GetFixVersions returns fix versions for a vulnerability instance.
 func (d *DB) GetFixVersions(ctx context.Context, instanceID uuid.UUID) ([]string, error) {
 	rows, err := d.Pool.Query(ctx, `

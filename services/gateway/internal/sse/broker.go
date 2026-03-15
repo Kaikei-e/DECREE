@@ -11,36 +11,44 @@ const clientBufferSize = 64
 // Broker manages SSE client connections and broadcasts events.
 type Broker struct {
 	mu      sync.RWMutex
-	clients map[uint64]chan Event
+	clients map[uint64]clientSubscription
 	nextID  atomic.Uint64
+}
+
+type clientSubscription struct {
+	projectID string
+	ch        chan Event
 }
 
 func NewBroker() *Broker {
 	return &Broker{
-		clients: make(map[uint64]chan Event),
+		clients: make(map[uint64]clientSubscription),
 	}
 }
 
 // Register adds a new client and returns its ID and event channel.
-func (b *Broker) Register() (uint64, <-chan Event) {
+func (b *Broker) Register(projectID string) (uint64, <-chan Event) {
 	id := b.nextID.Add(1)
 	ch := make(chan Event, clientBufferSize)
 
 	b.mu.Lock()
-	b.clients[id] = ch
+	b.clients[id] = clientSubscription{
+		projectID: projectID,
+		ch:        ch,
+	}
 	b.mu.Unlock()
 
-	slog.Info("sse client registered", "client_id", id)
+	slog.Info("sse client registered", "client_id", id, "project_id", projectID)
 	return id, ch
 }
 
 // Unregister removes a client and closes its channel.
 func (b *Broker) Unregister(id uint64) {
 	b.mu.Lock()
-	ch, ok := b.clients[id]
+	sub, ok := b.clients[id]
 	if ok {
 		delete(b.clients, id)
-		close(ch)
+		close(sub.ch)
 	}
 	b.mu.Unlock()
 
@@ -55,9 +63,12 @@ func (b *Broker) Broadcast(event Event) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	for id, ch := range b.clients {
+	for id, sub := range b.clients {
+		if sub.projectID != "" && event.ProjectID != "" && sub.projectID != event.ProjectID {
+			continue
+		}
 		select {
-		case ch <- event:
+		case sub.ch <- event:
 		default:
 			slog.Warn("sse client buffer full, dropping event", "client_id", id, "event_type", event.Type)
 		}

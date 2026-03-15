@@ -8,7 +8,7 @@ import (
 func TestBroker_RegisterUnregister(t *testing.T) {
 	b := NewBroker()
 
-	id, ch := b.Register()
+	id, ch := b.Register("")
 	if ch == nil {
 		t.Fatal("expected non-nil channel")
 	}
@@ -30,8 +30,8 @@ func TestBroker_RegisterUnregister(t *testing.T) {
 
 func TestBroker_Broadcast(t *testing.T) {
 	b := NewBroker()
-	_, ch1 := b.Register()
-	_, ch2 := b.Register()
+	_, ch1 := b.Register("")
+	_, ch2 := b.Register("")
 
 	event := Event{ID: "1-0", Type: "finding_changed", Data: `{"test":true}`}
 	b.Broadcast(event)
@@ -57,7 +57,7 @@ func TestBroker_Broadcast(t *testing.T) {
 
 func TestBroker_DropOnFullBuffer(t *testing.T) {
 	b := NewBroker()
-	_, ch := b.Register()
+	_, ch := b.Register("")
 
 	// Fill the buffer
 	for i := range clientBufferSize {
@@ -84,4 +84,32 @@ func TestBroker_DropOnFullBuffer(t *testing.T) {
 func TestBroker_UnregisterNonexistent(t *testing.T) {
 	b := NewBroker()
 	b.Unregister(999) // Should not panic
+}
+
+func TestBroker_ProjectScopedBroadcast(t *testing.T) {
+	b := NewBroker()
+	_, scoped := b.Register("project-a")
+	_, unscoped := b.Register("")
+
+	b.Broadcast(Event{ID: "1-0", Type: "finding_changed", ProjectID: "project-b", Data: "{}"})
+
+	select {
+	case <-scoped:
+		t.Fatal("scoped subscriber received wrong project event")
+	default:
+	}
+
+	select {
+	case <-unscoped:
+	case <-time.After(time.Second):
+		t.Fatal("unscoped subscriber did not receive event")
+	}
+
+	b.Broadcast(Event{ID: "2-0", Type: "finding_changed", ProjectID: "project-a", Data: "{}"})
+
+	select {
+	case <-scoped:
+	case <-time.After(time.Second):
+		t.Fatal("scoped subscriber did not receive matching project event")
+	}
 }
