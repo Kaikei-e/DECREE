@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let osv = OsvClient::new();
 
     // Scan pipeline
-    let pipeline = Arc::new(ScanPipeline::new(pool.clone(), osv));
+    let pipeline = Arc::new(ScanPipeline::new(pool.clone(), osv, EpssClient::new()));
 
     // RPC services
     let scanner_service = ScannerRpcService::new(pool.clone(), Arc::clone(&pipeline));

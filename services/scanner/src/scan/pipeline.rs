@@ -1,22 +1,27 @@
 use sqlx::PgPool;
-use tracing::{error, info};
+use std::collections::BTreeSet;
+
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::adapter::TargetAdapter;
 use crate::db::models::NewObservation;
 use crate::db::queries;
+use crate::enrichment::epss::client::EpssClient;
 use crate::enrichment::score;
 use crate::error::{Result, ScannerError};
 use crate::osv::client::{OsvClient, advisory_source};
+use crate::osv::types::OsvBatchResult;
 
 pub struct ScanPipeline {
     pool: PgPool,
     osv: OsvClient,
+    epss: EpssClient,
 }
 
 impl ScanPipeline {
-    pub fn new(pool: PgPool, osv: OsvClient) -> Self {
-        Self { pool, osv }
+    pub fn new(pool: PgPool, osv: OsvClient, epss: EpssClient) -> Self {
+        Self { pool, osv, epss }
     }
 
     /// Execute a full scan pipeline for the given job.
@@ -93,6 +98,10 @@ impl ScanPipeline {
         );
 
         let osv_results = self.osv.query_batch(&sbom.packages).await?;
+
+        if let Err(err) = self.prefetch_epss_snapshots(&osv_results).await {
+            warn!(error = %err, "EPSS prefetch failed during scan, continuing without fresh EPSS data");
+        }
 
         // Persist findings in a transaction
         let mut tx = self.pool.begin().await.map_err(ScannerError::Database)?;
@@ -211,5 +220,88 @@ impl ScanPipeline {
         let _ = queries::update_scan_job_status(&self.pool, job_id, "completed", None).await;
 
         Ok(())
+    }
+
+    async fn prefetch_epss_snapshots(&self, osv_results: &[OsvBatchResult]) -> Result<()> {
+        let cve_ids = collect_cve_ids(osv_results);
+        if cve_ids.is_empty() {
+            return Ok(());
+        }
+
+        let entries = self.epss.fetch_batch(&cve_ids).await?;
+        let mut tx = self.pool.begin().await.map_err(ScannerError::Database)?;
+
+        for entry in entries {
+            sqlx::query(
+                r#"
+                INSERT INTO advisory_epss_snapshots (cve_id, epss_score, epss_percentile, epss_date, fetched_at)
+                VALUES ($1, $2, $3, $4::date, now())
+                ON CONFLICT (cve_id, epss_date) DO NOTHING
+                "#,
+            )
+            .bind(&entry.cve)
+            .bind(entry.epss)
+            .bind(entry.percentile)
+            .bind(&entry.date)
+            .execute(&mut *tx)
+            .await
+            .map_err(ScannerError::Database)?;
+        }
+
+        tx.commit().await.map_err(ScannerError::Database)?;
+        Ok(())
+    }
+}
+
+fn collect_cve_ids(osv_results: &[OsvBatchResult]) -> Vec<String> {
+    let mut cves = BTreeSet::new();
+    for batch in osv_results {
+        for vuln in &batch.vulns {
+            let advisory_id = vuln.primary_id();
+            if advisory_id.starts_with("CVE-") {
+                cves.insert(advisory_id.to_string());
+            }
+        }
+    }
+    cves.into_iter().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collect_cve_ids;
+    use crate::osv::types::OsvBatchResult;
+    use crate::osv::types::OsvVulnerability;
+
+    fn vuln(id: &str, aliases: &[&str]) -> OsvVulnerability {
+        OsvVulnerability {
+            id: id.to_string(),
+            aliases: aliases.iter().map(|s| s.to_string()).collect(),
+            summary: None,
+            severity: vec![],
+            affected: vec![],
+        }
+    }
+
+    #[test]
+    fn collect_cve_ids_prefers_cve_aliases_and_deduplicates() {
+        let results = vec![
+            OsvBatchResult {
+                vulns: vec![
+                    vuln("GHSA-aaaa", &["CVE-2026-1111"]),
+                    vuln("CVE-2026-1111", &[]),
+                    vuln("GHSA-bbbb", &["CVE-2026-2222"]),
+                ],
+            },
+            OsvBatchResult {
+                vulns: vec![vuln("RUSTSEC-2026-0001", &[])],
+            },
+        ];
+
+        let cves = collect_cve_ids(&results);
+
+        assert_eq!(
+            cves,
+            vec!["CVE-2026-1111".to_string(), "CVE-2026-2222".to_string()]
+        );
     }
 }

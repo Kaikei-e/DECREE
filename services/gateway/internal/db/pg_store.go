@@ -10,6 +10,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const latestEpssJoin = `
+		LEFT JOIN LATERAL (
+			SELECT epss_score
+			FROM advisory_epss_snapshots
+			WHERE cve_id = vi.advisory_id
+			ORDER BY epss_date DESC
+			LIMIT 1
+		) epss ON true
+`
+
 // PgStore implements Store using pgxpool.
 type PgStore struct {
 	pool *pgxpool.Pool
@@ -105,11 +115,7 @@ func (s *PgStore) ListFindings(ctx context.Context, params FindingParams) ([]Fin
 		argN++
 	}
 	if params.MinEPSS != nil {
-		conditions = append(conditions, fmt.Sprintf(`EXISTS (
-			SELECT 1 FROM vulnerability_observations vo2
-			WHERE vo2.instance_id = vi.id AND vo2.epss_score >= $%d
-			ORDER BY vo2.observed_at DESC LIMIT 1
-		)`, argN))
+		conditions = append(conditions, fmt.Sprintf("COALESCE(epss.epss_score, vo.epss_score) >= $%d", argN))
 		args = append(args, *params.MinEPSS)
 		argN++
 	}
@@ -125,7 +131,7 @@ func (s *PgStore) ListFindings(ctx context.Context, params FindingParams) ([]Fin
 	query := fmt.Sprintf(`
 		SELECT vi.id, vi.target_id, t.name, vi.package_name, vi.package_version,
 		       vi.ecosystem, vi.advisory_id, cfs.last_severity, cfs.last_score,
-		       vo.epss_score, vo.cvss_score, cfs.is_active, cfs.last_observed_at
+		       COALESCE(epss.epss_score, vo.epss_score), vo.cvss_score, cfs.is_active, cfs.last_observed_at
 		FROM current_finding_status cfs
 		JOIN vulnerability_instances vi ON vi.id = cfs.instance_id
 		JOIN targets t ON t.id = vi.target_id
@@ -133,10 +139,11 @@ func (s *PgStore) ListFindings(ctx context.Context, params FindingParams) ([]Fin
 			SELECT epss_score, cvss_score FROM vulnerability_observations
 			WHERE instance_id = vi.id ORDER BY observed_at DESC LIMIT 1
 		) vo ON true
+%s
 		WHERE %s
 		ORDER BY COALESCE(cfs.last_score, 0) DESC, vi.id
 		LIMIT $%d
-	`, where, argN)
+	`, latestEpssJoin, where, argN)
 	args = append(args, fetchLimit)
 
 	rows, err := s.pool.Query(ctx, query, args...)
@@ -161,7 +168,7 @@ func (s *PgStore) GetFindingDetail(ctx context.Context, instanceID uuid.UUID) (*
 		SELECT vi.id, vi.target_id, t.name, vi.package_name, vi.package_version,
 		       vi.ecosystem, vi.advisory_id, vi.advisory_source,
 		       cfs.last_severity, cfs.last_score, cfs.is_active, cfs.last_observed_at,
-		       vo.epss_score, vo.cvss_score, vo.cvss_vector, vo.reachability,
+		       COALESCE(epss.epss_score, vo.epss_score), vo.cvss_score, vo.cvss_vector, vo.reachability,
 		       vo.is_direct_dep, vo.dep_depth, t.exposure_class
 		FROM vulnerability_instances vi
 		JOIN current_finding_status cfs ON cfs.instance_id = vi.id
@@ -171,6 +178,13 @@ func (s *PgStore) GetFindingDetail(ctx context.Context, instanceID uuid.UUID) (*
 			FROM vulnerability_observations
 			WHERE instance_id = vi.id ORDER BY observed_at DESC LIMIT 1
 		) vo ON true
+		LEFT JOIN LATERAL (
+			SELECT epss_score
+			FROM advisory_epss_snapshots
+			WHERE cve_id = vi.advisory_id
+			ORDER BY epss_date DESC
+			LIMIT 1
+		) epss ON true
 		WHERE vi.id = $1
 	`, instanceID).Scan(
 		&d.InstanceID, &d.TargetID, &d.TargetName, &d.PackageName, &d.PackageVersion,
@@ -251,7 +265,7 @@ func (s *PgStore) ListTopRisks(ctx context.Context, projectID uuid.UUID, limit i
 	rows, err := s.pool.Query(ctx, `
 		SELECT vi.id, vi.target_id, t.name, vi.package_name, vi.package_version,
 		       vi.ecosystem, vi.advisory_id, cfs.last_severity, cfs.last_score,
-		       vo.epss_score, vo.cvss_score, cfs.is_active, cfs.last_observed_at
+		       COALESCE(epss.epss_score, vo.epss_score), vo.cvss_score, cfs.is_active, cfs.last_observed_at
 		FROM current_finding_status cfs
 		JOIN vulnerability_instances vi ON vi.id = cfs.instance_id
 		JOIN targets t ON t.id = vi.target_id
@@ -259,6 +273,13 @@ func (s *PgStore) ListTopRisks(ctx context.Context, projectID uuid.UUID, limit i
 			SELECT epss_score, cvss_score FROM vulnerability_observations
 			WHERE instance_id = vi.id ORDER BY observed_at DESC LIMIT 1
 		) vo ON true
+		LEFT JOIN LATERAL (
+			SELECT epss_score
+			FROM advisory_epss_snapshots
+			WHERE cve_id = vi.advisory_id
+			ORDER BY epss_date DESC
+			LIMIT 1
+		) epss ON true
 		WHERE t.project_id = $1 AND cfs.is_active = true AND cfs.last_score IS NOT NULL
 		ORDER BY cfs.last_score DESC
 		LIMIT $2

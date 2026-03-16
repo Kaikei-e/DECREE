@@ -260,34 +260,50 @@ func (s *Scheduler) runEnrichmentRefresh(ctx context.Context) {
 	defer nvdTicker.Stop()
 	defer exploitTicker.Stop()
 
+	s.refreshEpss(ctx)
+	s.refreshNvd(ctx)
+	s.refreshExploitDb(ctx)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-epssTicker.C:
-			s.log.InfoContext(ctx, "refreshing EPSS data")
-			if resp, err := s.scanner.SyncEpss(ctx); err != nil {
-				s.log.ErrorContext(ctx, "EPSS sync failed", "error", err)
-			} else {
-				s.log.InfoContext(ctx, "EPSS sync complete", "synced", resp.SyncedCount)
-				s.recalculateAfterRefresh(ctx)
-			}
+			s.refreshEpss(ctx)
 		case <-nvdTicker.C:
-			s.log.InfoContext(ctx, "refreshing NVD data")
-			if resp, err := s.scanner.SyncNvd(ctx); err != nil {
-				s.log.ErrorContext(ctx, "NVD sync failed", "error", err)
-			} else {
-				s.log.InfoContext(ctx, "NVD sync complete", "synced", resp.SyncedCount)
-				s.recalculateAfterRefresh(ctx)
-			}
+			s.refreshNvd(ctx)
 		case <-exploitTicker.C:
-			s.log.InfoContext(ctx, "refreshing ExploitDB data")
-			if resp, err := s.scanner.SyncExploitDb(ctx); err != nil {
-				s.log.ErrorContext(ctx, "ExploitDB sync failed", "error", err)
-			} else {
-				s.log.InfoContext(ctx, "ExploitDB sync complete", "exploits", resp.ExploitsSynced, "links", resp.LinksSynced)
-			}
+			s.refreshExploitDb(ctx)
 		}
+	}
+}
+
+func (s *Scheduler) refreshEpss(ctx context.Context) {
+	s.log.InfoContext(ctx, "refreshing EPSS data")
+	if resp, err := s.scanner.SyncEpss(ctx); err != nil {
+		s.log.ErrorContext(ctx, "EPSS sync failed", "error", err)
+	} else {
+		s.log.InfoContext(ctx, "EPSS sync complete", "synced", resp.SyncedCount)
+		s.recalculateAfterRefresh(ctx)
+	}
+}
+
+func (s *Scheduler) refreshNvd(ctx context.Context) {
+	s.log.InfoContext(ctx, "refreshing NVD data")
+	if resp, err := s.scanner.SyncNvd(ctx); err != nil {
+		s.log.ErrorContext(ctx, "NVD sync failed", "error", err)
+	} else {
+		s.log.InfoContext(ctx, "NVD sync complete", "synced", resp.SyncedCount)
+		s.recalculateAfterRefresh(ctx)
+	}
+}
+
+func (s *Scheduler) refreshExploitDb(ctx context.Context) {
+	s.log.InfoContext(ctx, "refreshing ExploitDB data")
+	if resp, err := s.scanner.SyncExploitDb(ctx); err != nil {
+		s.log.ErrorContext(ctx, "ExploitDB sync failed", "error", err)
+	} else {
+		s.log.InfoContext(ctx, "ExploitDB sync complete", "exploits", resp.ExploitsSynced, "links", resp.LinksSynced)
 	}
 }
 

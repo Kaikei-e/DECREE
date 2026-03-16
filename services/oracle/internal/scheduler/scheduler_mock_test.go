@@ -51,9 +51,13 @@ func (m *mockTargetStore) ClearExpiredLeases(_ context.Context) error {
 
 // mockScannerService implements ScannerService for testing.
 type mockScannerService struct {
-	runScanResp   *scanner.RunScanResponse
-	scanStatusFn  func() *scanner.GetScanStatusResponse
-	runScanCalled bool
+	runScanResp      *scanner.RunScanResponse
+	scanStatusFn     func() *scanner.GetScanStatusResponse
+	runScanCalled    bool
+	syncEpssCalls    int
+	syncNvdCalls     int
+	syncExploitCalls int
+	recalculateCalls int
 }
 
 func (m *mockScannerService) RunScan(_ context.Context, _ string) (*scanner.RunScanResponse, error) {
@@ -66,18 +70,22 @@ func (m *mockScannerService) GetScanStatus(_ context.Context, _ string) (*scanne
 }
 
 func (m *mockScannerService) SyncEpss(_ context.Context) (*scanner.SyncEpssResponse, error) {
+	m.syncEpssCalls++
 	return &scanner.SyncEpssResponse{}, nil
 }
 
 func (m *mockScannerService) SyncNvd(_ context.Context) (*scanner.SyncNvdResponse, error) {
+	m.syncNvdCalls++
 	return &scanner.SyncNvdResponse{}, nil
 }
 
 func (m *mockScannerService) SyncExploitDb(_ context.Context) (*scanner.SyncExploitDbResponse, error) {
+	m.syncExploitCalls++
 	return &scanner.SyncExploitDbResponse{}, nil
 }
 
 func (m *mockScannerService) RecalculateScores(_ context.Context, _ []string) (*scanner.RecalculateScoresResponse, error) {
+	m.recalculateCalls++
 	return &scanner.RecalculateScoresResponse{}, nil
 }
 
@@ -176,5 +184,43 @@ func TestTick_SkipsNotDue(t *testing.T) {
 
 	if scanSvc.runScanCalled {
 		t.Error("RunScan should not be called when target is not due")
+	}
+}
+
+func TestRunEnrichmentRefresh_TriggersInitialSync(t *testing.T) {
+	scanSvc := &mockScannerService{}
+	cfg := &config.Config{
+		Scan: config.ScanConfig{
+			VulnerabilityRefresh: config.VulnerabilityRefreshConfig{
+				EPSS: config.Duration{Duration: time.Hour},
+				NVD:  config.Duration{Duration: time.Hour},
+			},
+		},
+	}
+
+	s := New(cfg, newMockTargetStore(), scanSvc, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.runEnrichmentRefresh(ctx)
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	<-done
+
+	if scanSvc.syncEpssCalls == 0 {
+		t.Fatal("expected initial EPSS sync")
+	}
+	if scanSvc.syncNvdCalls == 0 {
+		t.Fatal("expected initial NVD sync")
+	}
+	if scanSvc.syncExploitCalls == 0 {
+		t.Fatal("expected initial ExploitDB sync")
+	}
+	if scanSvc.recalculateCalls < 2 {
+		t.Fatalf("expected score recalculation after initial enrichment refreshes, got %d", scanSvc.recalculateCalls)
 	}
 }

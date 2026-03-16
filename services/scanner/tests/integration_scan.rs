@@ -71,7 +71,8 @@ async fn test_scan_pipeline_with_sbom_target() {
 
     // Run pipeline
     let osv = decree_scanner::osv::client::OsvClient::new();
-    let pipeline = decree_scanner::scan::pipeline::ScanPipeline::new(pool.clone(), osv);
+    let epss = decree_scanner::enrichment::epss::client::EpssClient::new();
+    let pipeline = decree_scanner::scan::pipeline::ScanPipeline::new(pool.clone(), osv, epss);
 
     let result = pipeline.execute(job_id).await;
 
