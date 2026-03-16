@@ -12,7 +12,7 @@ interface Props {
 
 const { filters, rendererType, ecosystems, onFiltersChange, onRendererChange }: Props = $props();
 
-const severities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
+const severities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
 
 function setSeverity(e: Event) {
 	const value = (e.target as HTMLSelectElement).value || undefined;

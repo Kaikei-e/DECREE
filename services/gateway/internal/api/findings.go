@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/Kaikei-e/decree/services/gateway/internal/db"
 )
@@ -25,7 +26,8 @@ func (h *findingsHandler) list(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	if v := q.Get("severity"); v != "" {
-		params.Severity = &v
+		lower := strings.ToLower(v)
+		params.Severity = &lower
 	}
 	if v := q.Get("ecosystem"); v != "" {
 		params.Ecosystem = &v
