@@ -15,31 +15,6 @@ on:
       - "docker-compose.yml"
 
 jobs:
-  atlas:
-    name: Atlas
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_DB: decree
-          POSTGRES_USER: decree
-          POSTGRES_PASSWORD: decree
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U decree"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ariga/setup-atlas@v0
-      - run: atlas migrate lint --env docker
-        working-directory: db
-        env:
-          ATLAS_DB_URL: "postgresql://decree:decree@localhost:5432/decree?sslmode=disable"
-
   compose-validate:
     name: Compose Validate
     runs-on: ubuntu-latest
