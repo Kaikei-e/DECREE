@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,7 +38,10 @@ func (d *DB) UpsertTarget(ctx context.Context, projectID uuid.UUID, name, target
 	err := d.Pool.QueryRow(ctx, `
 		INSERT INTO targets (project_id, name, target_type, source_ref, branch)
 		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT ON CONSTRAINT targets_pkey DO NOTHING
+		ON CONFLICT (project_id, name) DO UPDATE SET
+			target_type = EXCLUDED.target_type,
+			source_ref  = EXCLUDED.source_ref,
+			branch      = EXCLUDED.branch
 		RETURNING id`, projectID, name, targetType, sourceRef, branch).Scan(&id)
 
 	if err != nil {
@@ -58,7 +62,7 @@ func (d *DB) EnsureProject(ctx context.Context, name string) (uuid.UUID, error) 
 	err := d.Pool.QueryRow(ctx, `
 		INSERT INTO projects (name)
 		VALUES ($1)
-		ON CONFLICT DO NOTHING
+		ON CONFLICT (name) DO NOTHING
 		RETURNING id`, name).Scan(&id)
 
 	if err != nil {
@@ -96,6 +100,19 @@ func (d *DB) ReleaseLease(ctx context.Context, targetID uuid.UUID, holderID stri
 		WHERE target_id = $1 AND holder_id = $2`,
 		targetID, holderID)
 	return err
+}
+
+// ClearExpiredLeases removes all leases whose TTL has passed.
+// Called on startup to reclaim leases left by a previous oracle instance.
+func (d *DB) ClearExpiredLeases(ctx context.Context) error {
+	tag, err := d.Pool.Exec(ctx, `DELETE FROM job_leases WHERE expires_at < now()`)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() > 0 {
+		slog.Info("cleared expired leases", "count", tag.RowsAffected())
+	}
+	return nil
 }
 
 // UpdateLeaseJobID sets the job_id on a lease.

@@ -40,6 +40,11 @@ func New(cfg *config.Config, database *db.DB, scannerClient *scanner.Client, lea
 func (s *Scheduler) Run(ctx context.Context) error {
 	slog.Info("scheduler starting")
 
+	// Clean up stale leases from previous instances of this oracle
+	if err := s.db.ClearExpiredLeases(ctx); err != nil {
+		slog.Error("failed to clear expired leases", "error", err)
+	}
+
 	if err := s.seedTargets(ctx); err != nil {
 		return err
 	}
@@ -112,7 +117,7 @@ func (s *Scheduler) triggerScan(ctx context.Context, target db.Target) {
 		return
 	}
 	if !acquired {
-		slog.Debug("lease held by another, skipping", "target", target.Name)
+		slog.Warn("lease held by another, skipping scan", "target", target.Name)
 		return
 	}
 
