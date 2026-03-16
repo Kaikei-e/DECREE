@@ -1,12 +1,19 @@
 package sse
 
 import (
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 )
 
 const clientBufferSize = 64
+
+// MaxSSEClients is the maximum number of concurrent SSE connections.
+const MaxSSEClients = 256
+
+// ErrTooManyClients is returned when the SSE client limit is reached.
+var ErrTooManyClients = errors.New("too many SSE clients")
 
 // Broker manages SSE client connections and broadcasts events.
 type Broker struct {
@@ -27,11 +34,17 @@ func NewBroker() *Broker {
 }
 
 // Register adds a new client and returns its ID and event channel.
-func (b *Broker) Register(projectID string) (uint64, <-chan Event) {
+// Returns ErrTooManyClients if the maximum number of connections is reached.
+func (b *Broker) Register(projectID string) (uint64, <-chan Event, error) {
+	b.mu.Lock()
+	if len(b.clients) >= MaxSSEClients {
+		b.mu.Unlock()
+		slog.Warn("sse client rejected: max clients reached", "max", MaxSSEClients)
+		return 0, nil, ErrTooManyClients
+	}
+
 	id := b.nextID.Add(1)
 	ch := make(chan Event, clientBufferSize)
-
-	b.mu.Lock()
 	b.clients[id] = clientSubscription{
 		projectID: projectID,
 		ch:        ch,
@@ -39,7 +52,7 @@ func (b *Broker) Register(projectID string) (uint64, <-chan Event) {
 	b.mu.Unlock()
 
 	slog.Info("sse client registered", "client_id", id, "project_id", projectID)
-	return id, ch
+	return id, ch, nil
 }
 
 // Unregister removes a client and closes its channel.

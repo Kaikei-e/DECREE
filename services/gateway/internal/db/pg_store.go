@@ -190,7 +190,7 @@ func (s *PgStore) GetFindingDetail(ctx context.Context, instanceID uuid.UUID) (*
 
 	// Fix versions
 	fixRows, err := s.pool.Query(ctx,
-		`SELECT fixed_version FROM advisory_fix_versions WHERE instance_id = $1`, instanceID)
+		`SELECT DISTINCT fixed_version FROM advisory_fix_versions WHERE instance_id = $1`, instanceID)
 	if err != nil {
 		return nil, fmt.Errorf("get fix versions: %w", err)
 	}

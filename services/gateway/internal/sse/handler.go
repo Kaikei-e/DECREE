@@ -38,7 +38,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	clientID, ch := h.broker.Register(r.URL.Query().Get("project_id"))
+	clientID, ch, err := h.broker.Register(r.URL.Query().Get("project_id"))
+	if err != nil {
+		http.Error(w, "too many connections", http.StatusServiceUnavailable)
+		return
+	}
 	defer h.broker.Unregister(clientID)
 
 	heartbeat := time.NewTicker(heartbeatInterval)

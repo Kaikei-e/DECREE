@@ -8,7 +8,10 @@ import (
 func TestBroker_RegisterUnregister(t *testing.T) {
 	b := NewBroker()
 
-	id, ch := b.Register("")
+	id, ch, err := b.Register("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if ch == nil {
 		t.Fatal("expected non-nil channel")
 	}
@@ -30,8 +33,8 @@ func TestBroker_RegisterUnregister(t *testing.T) {
 
 func TestBroker_Broadcast(t *testing.T) {
 	b := NewBroker()
-	_, ch1 := b.Register("")
-	_, ch2 := b.Register("")
+	_, ch1, _ := b.Register("")
+	_, ch2, _ := b.Register("")
 
 	event := Event{ID: "1-0", Type: "finding_changed", Data: `{"test":true}`}
 	b.Broadcast(event)
@@ -57,7 +60,7 @@ func TestBroker_Broadcast(t *testing.T) {
 
 func TestBroker_DropOnFullBuffer(t *testing.T) {
 	b := NewBroker()
-	_, ch := b.Register("")
+	_, ch, _ := b.Register("")
 
 	// Fill the buffer
 	for i := range clientBufferSize {
@@ -86,10 +89,35 @@ func TestBroker_UnregisterNonexistent(t *testing.T) {
 	b.Unregister(999) // Should not panic
 }
 
+func TestBroker_RejectsWhenAtMaxClients(t *testing.T) {
+	b := NewBroker()
+	// Fill up to max
+	for range MaxSSEClients {
+		_, _, err := b.Register("")
+		if err != nil {
+			t.Fatalf("unexpected error registering client: %v", err)
+		}
+	}
+
+	if b.ClientCount() != MaxSSEClients {
+		t.Fatalf("client count = %d, want %d", b.ClientCount(), MaxSSEClients)
+	}
+
+	// Next registration should fail
+	_, _, err := b.Register("")
+	if err != ErrTooManyClients {
+		t.Fatalf("expected ErrTooManyClients, got %v", err)
+	}
+
+	if b.ClientCount() != MaxSSEClients {
+		t.Fatalf("client count = %d after rejected registration, want %d", b.ClientCount(), MaxSSEClients)
+	}
+}
+
 func TestBroker_ProjectScopedBroadcast(t *testing.T) {
 	b := NewBroker()
-	_, scoped := b.Register("project-a")
-	_, unscoped := b.Register("")
+	_, scoped, _ := b.Register("project-a")
+	_, unscoped, _ := b.Register("")
 
 	b.Broadcast(Event{ID: "1-0", Type: "finding_changed", ProjectID: "project-b", Data: "{}"})
 
