@@ -23,6 +23,10 @@ table "projects" {
   primary_key {
     columns = [column.id]
   }
+  index "idx_projects_name" {
+    columns = [column.name]
+    unique  = true
+  }
 }
 
 table "targets" {
@@ -67,6 +71,10 @@ table "targets" {
     columns     = [column.project_id]
     ref_columns = [table.projects.column.id]
     on_delete   = CASCADE
+  }
+  index "idx_targets_project_name" {
+    columns = [column.project_id, column.name]
+    unique  = true
   }
 }
 
@@ -146,6 +154,10 @@ table "advisory_fix_versions" {
     columns     = [column.instance_id]
     ref_columns = [table.vulnerability_instances.column.id]
     on_delete   = CASCADE
+  }
+  index "uq_advisory_fix_versions" {
+    columns = [column.instance_id, column.fixed_version]
+    unique  = true
   }
 }
 
