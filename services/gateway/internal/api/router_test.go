@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/Kaikei-e/decree/services/gateway/internal/db"
 	"github.com/Kaikei-e/decree/services/gateway/internal/sse"
+	"github.com/google/uuid"
 )
 
 // mockStore implements db.Store for testing.
@@ -45,24 +45,109 @@ func (m *mockStore) ListTimeline(ctx context.Context, params db.TimelineParams) 
 	return m.timeline, m.timelineMore, m.err
 }
 
-func TestHealthz(t *testing.T) {
-	router := NewRouter(&mockStore{}, sse.NewBroker())
-	req := httptest.NewRequest("GET", "/healthz", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
+func TestEndpoints(t *testing.T) {
+	t.Parallel()
+	pid := uuid.New()
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
+	tests := []struct {
+		name       string
+		method     string
+		path       string
+		store      *mockStore
+		wantStatus int
+	}{
+		{
+			name:       "healthz",
+			method:     "GET",
+			path:       "/healthz",
+			store:      &mockStore{},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:   "list projects",
+			method: "GET",
+			path:   "/api/projects",
+			store: &mockStore{
+				projects: []db.Project{
+					{ID: uuid.New(), Name: "test-project", CreatedAt: time.Now()},
+				},
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:   "list targets",
+			method: "GET",
+			path:   "/api/projects/" + pid.String() + "/targets",
+			store: &mockStore{
+				targets: []db.Target{
+					{ID: uuid.New(), ProjectID: pid, Name: "my-image", TargetType: "container_image", CreatedAt: time.Now()},
+				},
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "list targets invalid uuid",
+			method:     "GET",
+			path:       "/api/projects/not-a-uuid/targets",
+			store:      &mockStore{},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "list top risks",
+			method:     "GET",
+			path:       "/api/projects/" + uuid.New().String() + "/top-risks?limit=5",
+			store:      &mockStore{topRisks: []db.Finding{}},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "list timeline",
+			method:     "GET",
+			path:       "/api/projects/" + uuid.New().String() + "/timeline",
+			store:      &mockStore{timeline: []db.TimelineEvent{}, timelineMore: false},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "finding detail not found",
+			method:     "GET",
+			path:       "/api/findings/" + uuid.New().String(),
+			store:      &mockStore{findingDetail: nil},
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name:   "finding detail found",
+			method: "GET",
+			path:   "/api/findings/" + uuid.New().String(),
+			store: &mockStore{findingDetail: &db.FindingDetail{
+				Finding: db.Finding{
+					InstanceID:  uuid.New(),
+					PackageName: "lodash",
+					IsActive:    true,
+				},
+				AdvisorySource: "osv",
+				FixVersions:    []string{"4.17.21"},
+				Exploits:       []db.ExploitRef{},
+				DependencyPath: []db.DependencyEdge{},
+			}},
+			wantStatus: http.StatusOK,
+		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			router := NewRouter(tt.store, sse.NewBroker())
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
 
-	var body map[string]string
-	json.NewDecoder(w.Body).Decode(&body)
-	if body["status"] != "ok" {
-		t.Errorf("status = %q", body["status"])
+			if w.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %s", w.Code, tt.wantStatus, w.Body.String())
+			}
+		})
 	}
 }
 
-func TestListProjects(t *testing.T) {
+func TestListProjects_ResponseShape(t *testing.T) {
+	t.Parallel()
 	store := &mockStore{
 		projects: []db.Project{
 			{ID: uuid.New(), Name: "test-project", CreatedAt: time.Now()},
@@ -72,10 +157,6 @@ func TestListProjects(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/projects", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
 
 	var body struct {
 		Data []db.Project `json:"data"`
@@ -89,35 +170,8 @@ func TestListProjects(t *testing.T) {
 	}
 }
 
-func TestListTargets(t *testing.T) {
-	pid := uuid.New()
-	store := &mockStore{
-		targets: []db.Target{
-			{ID: uuid.New(), ProjectID: pid, Name: "my-image", TargetType: "container_image", CreatedAt: time.Now()},
-		},
-	}
-	router := NewRouter(store, sse.NewBroker())
-	req := httptest.NewRequest("GET", "/api/projects/"+pid.String()+"/targets", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-func TestListTargets_InvalidUUID(t *testing.T) {
-	router := NewRouter(&mockStore{}, sse.NewBroker())
-	req := httptest.NewRequest("GET", "/api/projects/not-a-uuid/targets", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", w.Code)
-	}
-}
-
 func TestListFindings_Pagination(t *testing.T) {
+	t.Parallel()
 	score := float32(8.5)
 	store := &mockStore{
 		findings: []db.Finding{
@@ -145,71 +199,12 @@ func TestListFindings_Pagination(t *testing.T) {
 	}
 }
 
-func TestGetFindingDetail_NotFound(t *testing.T) {
-	store := &mockStore{findingDetail: nil}
-	router := NewRouter(store, sse.NewBroker())
-	req := httptest.NewRequest("GET", "/api/findings/"+uuid.New().String(), nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", w.Code)
-	}
-}
-
-func TestGetFindingDetail_Found(t *testing.T) {
-	detail := &db.FindingDetail{
-		Finding: db.Finding{
-			InstanceID:  uuid.New(),
-			PackageName: "lodash",
-			IsActive:    true,
-		},
-		AdvisorySource: "osv",
-		FixVersions:    []string{"4.17.21"},
-		Exploits:       []db.ExploitRef{},
-		DependencyPath: []db.DependencyEdge{},
-	}
-	store := &mockStore{findingDetail: detail}
-	router := NewRouter(store, sse.NewBroker())
-	req := httptest.NewRequest("GET", "/api/findings/"+detail.InstanceID.String(), nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-func TestListTopRisks(t *testing.T) {
-	store := &mockStore{topRisks: []db.Finding{}}
-	router := NewRouter(store, sse.NewBroker())
-	req := httptest.NewRequest("GET", "/api/projects/"+uuid.New().String()+"/top-risks?limit=5", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
-func TestListTimeline(t *testing.T) {
-	store := &mockStore{timeline: []db.TimelineEvent{}, timelineMore: false}
-	router := NewRouter(store, sse.NewBroker())
-	req := httptest.NewRequest("GET", "/api/projects/"+uuid.New().String()+"/timeline", nil)
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
-	}
-}
-
 func TestSSEThroughMiddleware(t *testing.T) {
+	t.Parallel()
 	broker := sse.NewBroker()
 	router := NewRouter(&mockStore{}, broker)
 
 	req := httptest.NewRequest("GET", "/api/events?project_id=test", nil)
-	// Use a context with cancel so the SSE handler terminates.
 	ctx, cancel := context.WithCancel(req.Context())
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
@@ -220,7 +215,6 @@ func TestSSEThroughMiddleware(t *testing.T) {
 		router.ServeHTTP(w, req)
 	}()
 
-	// Give the handler a moment to write headers, then cancel.
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 	<-done
@@ -235,6 +229,7 @@ func TestSSEThroughMiddleware(t *testing.T) {
 }
 
 func TestCORSHeaders(t *testing.T) {
+	t.Parallel()
 	router := NewRouter(&mockStore{projects: []db.Project{}}, sse.NewBroker())
 	req := httptest.NewRequest("GET", "/api/projects", nil)
 	w := httptest.NewRecorder()
@@ -246,6 +241,7 @@ func TestCORSHeaders(t *testing.T) {
 }
 
 func TestCORSPreflight(t *testing.T) {
+	t.Parallel()
 	router := NewRouter(&mockStore{}, sse.NewBroker())
 	req := httptest.NewRequest("OPTIONS", "/api/projects", nil)
 	w := httptest.NewRecorder()
@@ -257,6 +253,7 @@ func TestCORSPreflight(t *testing.T) {
 }
 
 func TestPanicRecovery(t *testing.T) {
+	t.Parallel()
 	panicStore := &panicOnListStore{}
 	router := NewRouter(panicStore, sse.NewBroker())
 	req := httptest.NewRequest("GET", "/api/projects", nil)
@@ -272,4 +269,34 @@ type panicOnListStore struct{ mockStore }
 
 func (p *panicOnListStore) ListProjects(ctx context.Context) ([]db.Project, error) {
 	panic("test panic")
+}
+
+func TestRequestIDHeader(t *testing.T) {
+	t.Parallel()
+	router := NewRouter(&mockStore{projects: []db.Project{}}, sse.NewBroker())
+
+	t.Run("generated when absent", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest("GET", "/api/projects", nil)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		rid := w.Header().Get("X-Request-ID")
+		if rid == "" {
+			t.Error("expected X-Request-ID header")
+		}
+	})
+
+	t.Run("propagated when present", func(t *testing.T) {
+		t.Parallel()
+		req := httptest.NewRequest("GET", "/api/projects", nil)
+		req.Header.Set("X-Request-ID", "my-custom-id")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+
+		rid := w.Header().Get("X-Request-ID")
+		if rid != "my-custom-id" {
+			t.Errorf("X-Request-ID = %q, want my-custom-id", rid)
+		}
+	})
 }

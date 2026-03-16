@@ -10,21 +10,20 @@ type findingDetailHandler struct {
 	store db.Store
 }
 
-func (h *findingDetailHandler) get(w http.ResponseWriter, r *http.Request) {
-	instanceID, ok := parseUUID(w, r.PathValue("instance_id"))
-	if !ok {
-		return
+func (h *findingDetailHandler) get(w http.ResponseWriter, r *http.Request) error {
+	instanceID, err := parseUUID(r.PathValue("instance_id"))
+	if err != nil {
+		return err
 	}
 
 	detail, err := h.store.GetFindingDetail(r.Context(), instanceID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "db_error", "failed to get finding detail")
-		return
+		return ErrInternal("failed to get finding detail", err)
 	}
 	if detail == nil {
-		writeError(w, http.StatusNotFound, "not_found", "finding not found")
-		return
+		return ErrNotFound("not_found", "finding not found")
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"data": detail})
+	return nil
 }

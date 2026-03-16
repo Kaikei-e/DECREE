@@ -11,10 +11,10 @@ type findingsHandler struct {
 	store db.Store
 }
 
-func (h *findingsHandler) list(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := parseUUID(w, r.PathValue("id"))
-	if !ok {
-		return
+func (h *findingsHandler) list(w http.ResponseWriter, r *http.Request) error {
+	projectID, err := parseUUID(r.PathValue("id"))
+	if err != nil {
+		return err
 	}
 
 	q := r.URL.Query()
@@ -40,15 +40,13 @@ func (h *findingsHandler) list(w http.ResponseWriter, r *http.Request) {
 
 	cursor, err := parseFindingCursor(q.Get("cursor"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_cursor", err.Error())
-		return
+		return err
 	}
 	params.Cursor = cursor
 
 	findings, hasMore, err := h.store.ListFindings(r.Context(), params)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "db_error", "failed to list findings")
-		return
+		return ErrInternal("failed to list findings", err)
 	}
 
 	resp := PagedResponse[db.Finding]{
@@ -66,4 +64,5 @@ func (h *findingsHandler) list(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+	return nil
 }

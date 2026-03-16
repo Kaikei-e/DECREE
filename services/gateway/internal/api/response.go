@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/Kaikei-e/decree/services/gateway/internal/db"
+	"github.com/google/uuid"
 )
 
 type PagedResponse[T any] struct {
@@ -43,13 +43,13 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	})
 }
 
-func parseUUID(w http.ResponseWriter, s string) (uuid.UUID, bool) {
+// parseUUID parses a UUID string and returns an AppError on failure.
+func parseUUID(s string) (uuid.UUID, error) {
 	id, err := uuid.Parse(s)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_id", "invalid UUID: "+s)
-		return uuid.Nil, false
+		return uuid.Nil, ErrBadRequest("invalid_id", "invalid UUID: "+s)
 	}
-	return id, true
+	return id, nil
 }
 
 func parseLimit(r *http.Request, defaultLimit, maxLimit int) int {
@@ -79,19 +79,19 @@ func parseFindingCursor(s string) (*db.FindingCursor, error) {
 	}
 	raw, err := base64.URLEncoding.DecodeString(s)
 	if err != nil {
-		return nil, fmt.Errorf("invalid cursor encoding")
+		return nil, ErrBadRequest("invalid_cursor", "invalid cursor encoding")
 	}
 	parts := strings.SplitN(string(raw), "|", 2)
 	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid cursor format")
+		return nil, ErrBadRequest("invalid_cursor", "invalid cursor format")
 	}
 	score, err := strconv.ParseFloat(parts[0], 32)
 	if err != nil {
-		return nil, fmt.Errorf("invalid cursor score")
+		return nil, ErrBadRequest("invalid_cursor", "invalid cursor score")
 	}
 	id, err := uuid.Parse(parts[1])
 	if err != nil {
-		return nil, fmt.Errorf("invalid cursor id")
+		return nil, ErrBadRequest("invalid_cursor", "invalid cursor id")
 	}
 	return &db.FindingCursor{Score: float32(score), InstanceID: id}, nil
 }
@@ -108,19 +108,19 @@ func parseTimelineCursor(s string) (*db.TimelineCursor, error) {
 	}
 	raw, err := base64.URLEncoding.DecodeString(s)
 	if err != nil {
-		return nil, fmt.Errorf("invalid cursor encoding")
+		return nil, ErrBadRequest("invalid_cursor", "invalid cursor encoding")
 	}
 	parts := strings.SplitN(string(raw), "|", 2)
 	if len(parts) != 2 {
-		return nil, fmt.Errorf("invalid cursor format")
+		return nil, ErrBadRequest("invalid_cursor", "invalid cursor format")
 	}
 	t, err := time.Parse(time.RFC3339Nano, parts[0])
 	if err != nil {
-		return nil, fmt.Errorf("invalid cursor time")
+		return nil, ErrBadRequest("invalid_cursor", "invalid cursor time")
 	}
 	id, err := uuid.Parse(parts[1])
 	if err != nil {
-		return nil, fmt.Errorf("invalid cursor id")
+		return nil, ErrBadRequest("invalid_cursor", "invalid cursor id")
 	}
 	return &db.TimelineCursor{OccurredAt: t, ID: id}, nil
 }

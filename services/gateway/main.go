@@ -76,18 +76,24 @@ func main() {
 		MaxHeaderBytes: 1 << 20, // 1 MB
 	}
 
+	// Use errCh instead of os.Exit in goroutine for graceful shutdown.
+	errCh := make(chan error, 1)
 	go func() {
 		slog.Info("decree-gateway starting", "addr", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server failed", "error", err)
-			os.Exit(1)
+			errCh <- err
 		}
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-quit
-	slog.Info("shutting down", "signal", sig.String())
+
+	select {
+	case sig := <-quit:
+		slog.Info("shutting down", "signal", sig.String())
+	case err := <-errCh:
+		slog.Error("server failed", "error", err)
+	}
 
 	// Cancel context to stop consumer
 	cancel()
@@ -97,7 +103,6 @@ func main() {
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown error", "error", err)
-		os.Exit(1)
 	}
 
 	slog.Info("decree-gateway stopped")

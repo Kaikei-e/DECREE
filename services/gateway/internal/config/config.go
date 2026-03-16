@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 )
 
@@ -12,24 +13,35 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		return nil, fmt.Errorf("DATABASE_URL is required")
+	cfg := &Config{
+		RedisURL: envOr("REDIS_URL", "redis://127.0.0.1:6379"),
+		Port:     envOr("PORT", ":8400"),
 	}
 
-	redisURL := os.Getenv("REDIS_URL")
-	if redisURL == "" {
-		redisURL = "redis://127.0.0.1:6379"
+	var err error
+	cfg.DatabaseURL, err = envRequired("DATABASE_URL")
+	if err != nil {
+		return nil, err
 	}
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = ":8400"
+	if _, err := url.Parse(cfg.DatabaseURL); err != nil {
+		return nil, fmt.Errorf("invalid DATABASE_URL: %w", err)
 	}
 
-	return &Config{
-		DatabaseURL: dbURL,
-		RedisURL:    redisURL,
-		Port:        port,
-	}, nil
+	return cfg, nil
+}
+
+func envRequired(key string) (string, error) {
+	v := os.Getenv(key)
+	if v == "" {
+		return "", fmt.Errorf("required environment variable %s is not set", key)
+	}
+	return v, nil
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }

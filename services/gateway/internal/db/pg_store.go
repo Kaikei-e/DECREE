@@ -19,26 +19,51 @@ func NewPgStore(pool *pgxpool.Pool) *PgStore {
 	return &PgStore{pool: pool}
 }
 
+// scanProject scans a single Project row.
+func scanProject(row pgx.CollectableRow) (Project, error) {
+	var p Project
+	err := row.Scan(&p.ID, &p.Name, &p.CreatedAt)
+	return p, err
+}
+
+// scanTarget scans a single Target row.
+func scanTarget(row pgx.CollectableRow) (Target, error) {
+	var t Target
+	err := row.Scan(&t.ID, &t.ProjectID, &t.Name, &t.TargetType,
+		&t.SourceRef, &t.Branch, &t.Subpath, &t.ExposureClass, &t.CreatedAt)
+	return t, err
+}
+
+// scanFinding scans a single Finding row.
+func scanFinding(row pgx.CollectableRow) (Finding, error) {
+	var f Finding
+	err := row.Scan(&f.InstanceID, &f.TargetID, &f.TargetName,
+		&f.PackageName, &f.PackageVersion, &f.Ecosystem, &f.AdvisoryID,
+		&f.Severity, &f.DecreeScore, &f.EPSSScore, &f.CVSSScore,
+		&f.IsActive, &f.LastObservedAt)
+	return f, err
+}
+
+// scanTimelineEvent scans a single TimelineEvent row.
+func scanTimelineEvent(row pgx.CollectableRow) (TimelineEvent, error) {
+	var e TimelineEvent
+	err := row.Scan(&e.ID, &e.InstanceID, &e.ScanID, &e.EventType,
+		&e.OccurredAt, &e.AdvisoryID, &e.PackageName,
+		&e.Severity, &e.DecreeScore)
+	return e, err
+}
+
 func (s *PgStore) ListProjects(ctx context.Context) ([]Project, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, name, created_at FROM projects ORDER BY name`)
 	if err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
-	defer rows.Close()
-
-	var projects []Project
-	for rows.Next() {
-		var p Project
-		if err := rows.Scan(&p.ID, &p.Name, &p.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan project: %w", err)
-		}
-		projects = append(projects, p)
+	projects, err := pgx.CollectRows(rows, scanProject)
+	if err != nil {
+		return nil, fmt.Errorf("list projects: %w", err)
 	}
-	if projects == nil {
-		projects = []Project{}
-	}
-	return projects, rows.Err()
+	return orEmpty(projects), nil
 }
 
 func (s *PgStore) ListTargets(ctx context.Context, projectID uuid.UUID) ([]Target, error) {
@@ -48,32 +73,20 @@ func (s *PgStore) ListTargets(ctx context.Context, projectID uuid.UUID) ([]Targe
 	if err != nil {
 		return nil, fmt.Errorf("list targets: %w", err)
 	}
-	defer rows.Close()
-
-	var targets []Target
-	for rows.Next() {
-		var t Target
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Name, &t.TargetType,
-			&t.SourceRef, &t.Branch, &t.Subpath, &t.ExposureClass, &t.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan target: %w", err)
-		}
-		targets = append(targets, t)
+	targets, err := pgx.CollectRows(rows, scanTarget)
+	if err != nil {
+		return nil, fmt.Errorf("list targets: %w", err)
 	}
-	if targets == nil {
-		targets = []Target{}
-	}
-	return targets, rows.Err()
+	return orEmpty(targets), nil
 }
 
 func (s *PgStore) ListFindings(ctx context.Context, params FindingParams) ([]Finding, bool, error) {
-	// LIMIT N+1 to determine has_more
 	fetchLimit := params.Limit + 1
 
 	var conditions []string
 	var args []any
 	argN := 1
 
-	// Join targets through vulnerability_instances to filter by project
 	conditions = append(conditions, fmt.Sprintf("t.project_id = $%d", argN))
 	args = append(args, params.ProjectID)
 	argN++
@@ -130,31 +143,16 @@ func (s *PgStore) ListFindings(ctx context.Context, params FindingParams) ([]Fin
 	if err != nil {
 		return nil, false, fmt.Errorf("list findings: %w", err)
 	}
-	defer rows.Close()
-
-	var findings []Finding
-	for rows.Next() {
-		var f Finding
-		if err := rows.Scan(&f.InstanceID, &f.TargetID, &f.TargetName,
-			&f.PackageName, &f.PackageVersion, &f.Ecosystem, &f.AdvisoryID,
-			&f.Severity, &f.DecreeScore, &f.EPSSScore, &f.CVSSScore,
-			&f.IsActive, &f.LastObservedAt); err != nil {
-			return nil, false, fmt.Errorf("scan finding: %w", err)
-		}
-		findings = append(findings, f)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, false, err
+	findings, err := pgx.CollectRows(rows, scanFinding)
+	if err != nil {
+		return nil, false, fmt.Errorf("list findings: %w", err)
 	}
 
 	hasMore := len(findings) > params.Limit
 	if hasMore {
 		findings = findings[:params.Limit]
 	}
-	if findings == nil {
-		findings = []Finding{}
-	}
-	return findings, hasMore, nil
+	return orEmpty(findings), hasMore, nil
 }
 
 func (s *PgStore) GetFindingDetail(ctx context.Context, instanceID uuid.UUID) (*FindingDetail, error) {
@@ -194,16 +192,15 @@ func (s *PgStore) GetFindingDetail(ctx context.Context, instanceID uuid.UUID) (*
 	if err != nil {
 		return nil, fmt.Errorf("get fix versions: %w", err)
 	}
-	defer fixRows.Close()
-
-	d.FixVersions = []string{}
-	for fixRows.Next() {
+	d.FixVersions, err = pgx.CollectRows(fixRows, func(row pgx.CollectableRow) (string, error) {
 		var v string
-		if err := fixRows.Scan(&v); err != nil {
-			return nil, fmt.Errorf("scan fix version: %w", err)
-		}
-		d.FixVersions = append(d.FixVersions, v)
+		err := row.Scan(&v)
+		return v, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get fix versions: %w", err)
 	}
+	d.FixVersions = orEmpty(d.FixVersions)
 
 	// Exploits via advisory_id → exploit_cve_links → exploit_source_items
 	exploitRows, err := s.pool.Query(ctx, `
@@ -215,16 +212,15 @@ func (s *PgStore) GetFindingDetail(ctx context.Context, instanceID uuid.UUID) (*
 	if err != nil {
 		return nil, fmt.Errorf("get exploits: %w", err)
 	}
-	defer exploitRows.Close()
-
-	d.Exploits = []ExploitRef{}
-	for exploitRows.Next() {
+	d.Exploits, err = pgx.CollectRows(exploitRows, func(row pgx.CollectableRow) (ExploitRef, error) {
 		var e ExploitRef
-		if err := exploitRows.Scan(&e.Source, &e.SourceID, &e.Title, &e.URL, &e.PublishedAt); err != nil {
-			return nil, fmt.Errorf("scan exploit: %w", err)
-		}
-		d.Exploits = append(d.Exploits, e)
+		err := row.Scan(&e.Source, &e.SourceID, &e.Title, &e.URL, &e.PublishedAt)
+		return e, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get exploits: %w", err)
 	}
+	d.Exploits = orEmpty(d.Exploits)
 
 	// Dependency path from latest scan
 	depRows, err := s.pool.Query(ctx, `
@@ -238,16 +234,15 @@ func (s *PgStore) GetFindingDetail(ctx context.Context, instanceID uuid.UUID) (*
 	if err != nil {
 		return nil, fmt.Errorf("get dep edges: %w", err)
 	}
-	defer depRows.Close()
-
-	d.DependencyPath = []DependencyEdge{}
-	for depRows.Next() {
+	d.DependencyPath, err = pgx.CollectRows(depRows, func(row pgx.CollectableRow) (DependencyEdge, error) {
 		var e DependencyEdge
-		if err := depRows.Scan(&e.FromPkg, &e.ToPkg, &e.DepType); err != nil {
-			return nil, fmt.Errorf("scan dep edge: %w", err)
-		}
-		d.DependencyPath = append(d.DependencyPath, e)
+		err := row.Scan(&e.FromPkg, &e.ToPkg, &e.DepType)
+		return e, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get dep edges: %w", err)
 	}
+	d.DependencyPath = orEmpty(d.DependencyPath)
 
 	return &d, nil
 }
@@ -271,23 +266,11 @@ func (s *PgStore) ListTopRisks(ctx context.Context, projectID uuid.UUID, limit i
 	if err != nil {
 		return nil, fmt.Errorf("list top risks: %w", err)
 	}
-	defer rows.Close()
-
-	var findings []Finding
-	for rows.Next() {
-		var f Finding
-		if err := rows.Scan(&f.InstanceID, &f.TargetID, &f.TargetName,
-			&f.PackageName, &f.PackageVersion, &f.Ecosystem, &f.AdvisoryID,
-			&f.Severity, &f.DecreeScore, &f.EPSSScore, &f.CVSSScore,
-			&f.IsActive, &f.LastObservedAt); err != nil {
-			return nil, fmt.Errorf("scan top risk: %w", err)
-		}
-		findings = append(findings, f)
+	findings, err := pgx.CollectRows(rows, scanFinding)
+	if err != nil {
+		return nil, fmt.Errorf("list top risks: %w", err)
 	}
-	if findings == nil {
-		findings = []Finding{}
-	}
-	return findings, rows.Err()
+	return orEmpty(findings), nil
 }
 
 func (s *PgStore) ListTimeline(ctx context.Context, params TimelineParams) ([]TimelineEvent, bool, error) {
@@ -297,7 +280,6 @@ func (s *PgStore) ListTimeline(ctx context.Context, params TimelineParams) ([]Ti
 	var args []any
 	argN := 1
 
-	// Project filter via target join
 	conditions = append(conditions, fmt.Sprintf("t.project_id = $%d", argN))
 	args = append(args, params.ProjectID)
 	argN++
@@ -308,13 +290,11 @@ func (s *PgStore) ListTimeline(ctx context.Context, params TimelineParams) ([]Ti
 		argN++
 	}
 
-	// Build observation and disappearance conditions
 	obsConds := make([]string, len(conditions))
 	copy(obsConds, conditions)
 	disConds := make([]string, len(conditions))
 	copy(disConds, conditions)
 
-	// Time range filters
 	if params.From != nil {
 		obsConds = append(obsConds, fmt.Sprintf("vo.observed_at >= $%d", argN))
 		disConds = append(disConds, fmt.Sprintf("vd.disappeared_at >= $%d", argN))
@@ -328,7 +308,6 @@ func (s *PgStore) ListTimeline(ctx context.Context, params TimelineParams) ([]Ti
 		argN++
 	}
 
-	// Cursor
 	if params.Cursor != nil {
 		obsConds = append(obsConds, fmt.Sprintf("(vo.observed_at, vo.id) < ($%d, $%d)", argN, argN+1))
 		disConds = append(disConds, fmt.Sprintf("(vd.disappeared_at, vd.id) < ($%d, $%d)", argN, argN+1))
@@ -339,7 +318,6 @@ func (s *PgStore) ListTimeline(ctx context.Context, params TimelineParams) ([]Ti
 	obsWhere := strings.Join(obsConds, " AND ")
 	disWhere := strings.Join(disConds, " AND ")
 
-	// Event type filter
 	obsSelect := true
 	disSelect := true
 	if params.EventType != nil {
@@ -386,28 +364,14 @@ func (s *PgStore) ListTimeline(ctx context.Context, params TimelineParams) ([]Ti
 	if err != nil {
 		return nil, false, fmt.Errorf("list timeline: %w", err)
 	}
-	defer rows.Close()
-
-	var events []TimelineEvent
-	for rows.Next() {
-		var e TimelineEvent
-		if err := rows.Scan(&e.ID, &e.InstanceID, &e.ScanID, &e.EventType,
-			&e.OccurredAt, &e.AdvisoryID, &e.PackageName,
-			&e.Severity, &e.DecreeScore); err != nil {
-			return nil, false, fmt.Errorf("scan timeline event: %w", err)
-		}
-		events = append(events, e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, false, err
+	events, err := pgx.CollectRows(rows, scanTimelineEvent)
+	if err != nil {
+		return nil, false, fmt.Errorf("list timeline: %w", err)
 	}
 
 	hasMore := len(events) > params.Limit
 	if hasMore {
 		events = events[:params.Limit]
 	}
-	if events == nil {
-		events = []TimelineEvent{}
-	}
-	return events, hasMore, nil
+	return orEmpty(events), hasMore, nil
 }

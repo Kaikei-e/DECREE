@@ -17,31 +17,32 @@ func NewRouter(store db.Store, broker *sse.Broker) http.Handler {
 
 	// REST API
 	ph := &projectsHandler{store: store}
-	mux.HandleFunc("GET /api/projects", ph.list)
+	mux.HandleFunc("GET /api/projects", handleApp(ph.list))
 
 	th := &targetsHandler{store: store}
-	mux.HandleFunc("GET /api/projects/{id}/targets", th.list)
+	mux.HandleFunc("GET /api/projects/{id}/targets", handleApp(th.list))
 
 	fh := &findingsHandler{store: store}
-	mux.HandleFunc("GET /api/projects/{id}/findings", fh.list)
+	mux.HandleFunc("GET /api/projects/{id}/findings", handleApp(fh.list))
 
 	fdh := &findingDetailHandler{store: store}
-	mux.HandleFunc("GET /api/findings/{instance_id}", fdh.get)
+	mux.HandleFunc("GET /api/findings/{instance_id}", handleApp(fdh.get))
 
 	trh := &topRisksHandler{store: store}
-	mux.HandleFunc("GET /api/projects/{id}/top-risks", trh.list)
+	mux.HandleFunc("GET /api/projects/{id}/top-risks", handleApp(trh.list))
 
 	tlh := &timelineHandler{store: store}
-	mux.HandleFunc("GET /api/projects/{id}/timeline", tlh.list)
+	mux.HandleFunc("GET /api/projects/{id}/timeline", handleApp(tlh.list))
 
 	// SSE
 	sh := sse.NewHandler(broker)
 	mux.HandleFunc("GET /api/events", sh.ServeHTTP)
 
-	// Middleware chain: recovery → logging → cors → mux
+	// Middleware chain: recovery → requestID → logging → cors → mux
 	var handler http.Handler = mux
 	handler = corsMiddleware(handler)
 	handler = loggingMiddleware(handler)
+	handler = requestIDMiddleware(handler)
 	handler = recoveryMiddleware(handler)
 
 	return handler

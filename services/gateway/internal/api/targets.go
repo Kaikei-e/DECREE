@@ -10,16 +10,16 @@ type targetsHandler struct {
 	store db.Store
 }
 
-func (h *targetsHandler) list(w http.ResponseWriter, r *http.Request) {
-	projectID, ok := parseUUID(w, r.PathValue("id"))
-	if !ok {
-		return
+func (h *targetsHandler) list(w http.ResponseWriter, r *http.Request) error {
+	projectID, err := parseUUID(r.PathValue("id"))
+	if err != nil {
+		return err
 	}
 
 	targets, err := h.store.ListTargets(r.Context(), projectID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "db_error", "failed to list targets")
-		return
+		return ErrInternal("failed to list targets", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"data": targets})
+	return nil
 }

@@ -48,3 +48,9 @@ func TestLoad_CustomValues(t *testing.T) {
 		t.Errorf("Port = %q", cfg.Port)
 	}
 }
+
+func TestLoad_InvalidDatabaseURL(t *testing.T) {
+	t.Setenv("DATABASE_URL", "://invalid")
+	// url.Parse is very lenient; mainly testing that Load() does not panic.
+	_, _ = Load()
+}
