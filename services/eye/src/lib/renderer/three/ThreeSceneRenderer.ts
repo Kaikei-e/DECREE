@@ -13,7 +13,13 @@ import {
 import { createEdgeMaterial, createNodeMaterial } from './node-material';
 import { NodeRaycaster } from './raycaster';
 
-const NODE_GEOMETRY = new THREE.SphereGeometry(0.3, 16, 12);
+const NODE_GEOMETRY = new THREE.CylinderGeometry(0.16, 0.26, 1, 6, 1, false);
+const MIN_COLUMN_HEIGHT = 0.6;
+const MAX_COLUMN_WIDTH = 0.5;
+const DISTRICT_PADDING_X = 1.8;
+const DISTRICT_PADDING_Z = 1.6;
+const DISTRICT_FLOOR_Y = -0.04;
+const DISTRICT_PLATE_HEIGHT = 0.05;
 
 export class ThreeSceneRenderer implements SceneRenderer {
 	private renderer!: THREE.WebGLRenderer;
@@ -26,6 +32,7 @@ export class ThreeSceneRenderer implements SceneRenderer {
 
 	private instancedMesh: THREE.InstancedMesh | null = null;
 	private edgeLines: THREE.LineSegments | null = null;
+	private districtGroup: THREE.Group | null = null;
 	private nodeIds: string[] = [];
 	private graph: GraphModel | null = null;
 
@@ -93,6 +100,7 @@ export class ThreeSceneRenderer implements SceneRenderer {
 				this.edgeLines.material.dispose();
 			}
 		}
+		this.disposeDistricts();
 
 		this.scene.clear();
 
@@ -234,19 +242,22 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	}
 
 	private setupLights() {
-		const ambient = new THREE.AmbientLight(0xffffff, 0.4);
+		const ambient = new THREE.AmbientLight(0xffffff, 0.48);
 		this.scene.add(ambient);
-		const directional = new THREE.DirectionalLight(0xffffff, 0.8);
-		directional.position.set(10, 20, 10);
+		const directional = new THREE.DirectionalLight(0x7ddcff, 1.15);
+		directional.position.set(12, 24, 10);
 		this.scene.add(directional);
+		const rim = new THREE.DirectionalLight(0xff7a18, 0.35);
+		rim.position.set(-10, 12, -14);
+		this.scene.add(rim);
 
-		// HUD grid floor
-		const grid = new THREE.GridHelper(200, 40, 0x0a2030, 0x061520);
+		const grid = new THREE.GridHelper(200, 40, 0x12314a, 0x07131d);
 		this.scene.add(grid);
 	}
 
 	private handlePointerMove = (e: PointerEvent) => {
-		this.raycaster.updatePointer(e, this.container!);
+		if (!this.container) return;
+		this.raycaster.updatePointer(e, this.container);
 		const nodeId = this.raycaster.pick();
 		if (nodeId !== this.hoveredNodeId) {
 			this.hoveredNodeId = nodeId;
@@ -257,7 +268,8 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	};
 
 	private handleClick = (e: MouseEvent) => {
-		this.raycaster.updatePointer(e as PointerEvent, this.container!);
+		if (!this.container) return;
+		this.raycaster.updatePointer(e as PointerEvent, this.container);
 		const nodeId = this.raycaster.pick();
 		if (nodeId) {
 			this.clickCallback?.(nodeId);
@@ -285,9 +297,13 @@ export class ThreeSceneRenderer implements SceneRenderer {
 				this.edgeLines.material.dispose();
 			}
 		}
+		this.disposeDistricts();
 
 		const nodes = Array.from(model.nodes.values());
 		if (nodes.length === 0) return;
+
+		this.districtGroup = this.createDistrictGroup(model);
+		this.scene.add(this.districtGroup);
 
 		// Instanced mesh for nodes
 		const material = createNodeMaterial();
@@ -300,15 +316,18 @@ export class ThreeSceneRenderer implements SceneRenderer {
 			const node = nodes[i];
 			if (!node) continue;
 			this.nodeIds.push(node.id);
-			const scale = node.visual.size;
-			matrix.makeScale(scale, scale, scale);
-			matrix.setPosition(node.position.x, node.position.y, node.position.z);
+			const width = Math.min(MAX_COLUMN_WIDTH, 0.18 + node.visual.size * 0.12);
+			const height = Math.max(MIN_COLUMN_HEIGHT, node.position.y);
+			matrix.makeScale(width, height, width);
+			matrix.setPosition(node.position.x, height / 2, node.position.z);
 			mesh.setMatrixAt(i, matrix);
-			color.set(node.visual.color);
+			color.set(node.visual.color).lerp(new THREE.Color(0xffffff), node.epssScore * 0.18);
 			mesh.setColorAt(i, color);
 		}
 		mesh.instanceMatrix.needsUpdate = true;
 		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+		mesh.castShadow = false;
+		mesh.receiveShadow = false;
 		this.scene.add(mesh);
 		this.instancedMesh = mesh;
 		this.raycaster.setInstancedMesh(mesh, this.nodeIds);
@@ -336,6 +355,98 @@ export class ThreeSceneRenderer implements SceneRenderer {
 			this.edgeLines = new THREE.LineSegments(geometry, edgeMat);
 			this.scene.add(this.edgeLines);
 		}
+	}
+
+	private createDistrictGroup(model: GraphModel): THREE.Group {
+		const group = new THREE.Group();
+		group.name = 'districts';
+
+		for (const cluster of model.clusters) {
+			const clusterNodes = cluster.nodes
+				.map((nodeId) => model.nodes.get(nodeId))
+				.filter((node): node is NonNullable<typeof node> => Boolean(node));
+			if (clusterNodes.length === 0) continue;
+
+			let minX = Infinity;
+			let maxX = -Infinity;
+			let minZ = Infinity;
+			let maxZ = -Infinity;
+
+			for (const node of clusterNodes) {
+				minX = Math.min(minX, node.position.x);
+				maxX = Math.max(maxX, node.position.x);
+				minZ = Math.min(minZ, node.position.z);
+				maxZ = Math.max(maxZ, node.position.z);
+			}
+
+			const width = Math.max(2.4, maxX - minX + DISTRICT_PADDING_X);
+			const depth = Math.max(2.8, maxZ - minZ + DISTRICT_PADDING_Z);
+			const centerX = (minX + maxX) / 2;
+			const centerZ = (minZ + maxZ) / 2;
+
+			const plate = new THREE.Mesh(
+				new THREE.BoxGeometry(width, DISTRICT_PLATE_HEIGHT, depth),
+				new THREE.MeshBasicMaterial({
+					color: 0x081723,
+					transparent: true,
+					opacity: 0.92,
+				}),
+			);
+			plate.position.set(centerX, DISTRICT_FLOOR_Y, centerZ);
+			group.add(plate);
+
+			const outlinePoints = [
+				new THREE.Vector3(centerX - width / 2, 0.01, centerZ - depth / 2),
+				new THREE.Vector3(centerX + width / 2, 0.01, centerZ - depth / 2),
+				new THREE.Vector3(centerX + width / 2, 0.01, centerZ + depth / 2),
+				new THREE.Vector3(centerX - width / 2, 0.01, centerZ + depth / 2),
+				new THREE.Vector3(centerX - width / 2, 0.01, centerZ - depth / 2),
+			];
+			const outlineGeometry = new THREE.BufferGeometry().setFromPoints(outlinePoints);
+			const outline = new THREE.Line(
+				outlineGeometry,
+				new THREE.LineBasicMaterial({
+					color: 0x1a5d8f,
+					transparent: true,
+					opacity: 0.9,
+				}),
+			);
+			group.add(outline);
+
+			const beaconGeometry = new THREE.BufferGeometry().setFromPoints([
+				new THREE.Vector3(centerX, 0.01, centerZ),
+				new THREE.Vector3(centerX, 0.9, centerZ),
+			]);
+			const beacon = new THREE.Line(
+				beaconGeometry,
+				new THREE.LineBasicMaterial({
+					color: 0x00e5ff,
+					transparent: true,
+					opacity: 0.55,
+				}),
+			);
+			group.add(beacon);
+		}
+
+		return group;
+	}
+
+	private disposeDistricts() {
+		if (!this.districtGroup) return;
+		this.scene.remove(this.districtGroup);
+		for (const child of this.districtGroup.children) {
+			if ('geometry' in child && child.geometry instanceof THREE.BufferGeometry) {
+				child.geometry.dispose();
+			}
+			const material = 'material' in child ? child.material : null;
+			if (Array.isArray(material)) {
+				for (const item of material) item.dispose();
+			} else if (material instanceof THREE.Material) {
+				material.dispose();
+			}
+		}
+		this.districtGroup.clear();
+		this.districtGroup = null;
 	}
 
 	private animate() {

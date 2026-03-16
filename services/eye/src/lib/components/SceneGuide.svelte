@@ -38,27 +38,16 @@ const quickStats = $derived([
 ]);
 </script>
 
-<section class="hud-panel bg-hud-base/84 px-4 py-4 backdrop-blur">
-	<div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-		<div class="max-w-3xl space-y-2">
-			<div class="flex flex-wrap items-center gap-2">
-				<p class="hud-header">Scene At A Glance</p>
-				<span class="rounded-full border border-hud-accent/30 bg-hud-accent/10 px-2 py-1 font-mono text-[11px] uppercase tracking-[0.14em] text-hud-accent">
-					{liveLabel}
-				</span>
-			</div>
-
-			<h2 class="text-lg font-semibold text-hud-text">
-				Keep the 3D field in focus, and pull the interpretation guide only when you need it.
-			</h2>
-
-			<p class="max-w-2xl text-sm leading-6 text-hud-text-secondary">
-				The persistent strip below carries the minimum context for orientation. The expanded guide
-				adds legend and distribution detail without permanently consuming scene area.
-			</p>
+<section class="hud-panel bg-hud-base/84 px-3 py-3 backdrop-blur">
+	<div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+		<div class="flex flex-wrap items-center gap-2">
+			<p class="hud-header">Scene At A Glance</p>
+			<span class="rounded-full border border-hud-accent/30 bg-hud-accent/10 px-2 py-1 font-mono text-[11px] uppercase tracking-[0.14em] text-hud-accent">
+				{liveLabel}
+			</span>
 		</div>
 
-		<div class="flex items-center gap-2 xl:pt-1">
+		<div class="flex items-center gap-2">
 			<button
 				type="button"
 				class="rounded-sm border border-hud-border bg-hud-surface px-3 py-2 font-mono text-xs uppercase tracking-[0.14em] text-hud-text-secondary transition-colors hover:border-hud-border-bright hover:text-hud-text"
@@ -70,38 +59,18 @@ const quickStats = $derived([
 		</div>
 	</div>
 
-	<div class="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)]">
-		<div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+	<div class="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
 			{#each quickStats as item}
-				<div class="rounded-sm border border-hud-border bg-hud-surface/70 px-3 py-3">
+				<div class="rounded-sm border border-hud-border bg-hud-surface/70 px-3 py-2.5">
 					<p class="hud-header">{item.label}</p>
-					<p class="mt-2 font-mono text-2xl text-hud-text">{item.value}</p>
+					<p class="mt-1 font-mono text-xl text-hud-text">{item.value}</p>
 					<p class="mt-1 text-xs text-hud-text-secondary">{item.note}</p>
 				</div>
 			{/each}
-		</div>
-
-		<div class="rounded-sm border border-hud-border bg-hud-surface/60 px-3 py-3">
-			<p class="hud-header">Always-On Reading Keys</p>
-			<div class="mt-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-1">
-				<div class="rounded-sm border border-hud-border/70 bg-hud-base/45 px-3 py-2">
-					<p class="font-mono text-[11px] uppercase tracking-[0.14em] text-hud-text">Orb = instance</p>
-					<p class="mt-1 text-xs text-hud-text-secondary">Each node maps to one vulnerable package instance.</p>
-				</div>
-				<div class="rounded-sm border border-hud-border/70 bg-hud-base/45 px-3 py-2">
-					<p class="font-mono text-[11px] uppercase tracking-[0.14em] text-hud-text">Height = DECREE</p>
-					<p class="mt-1 text-xs text-hud-text-secondary">Scan upward for higher urgency.</p>
-				</div>
-				<div class="rounded-sm border border-hud-border/70 bg-hud-base/45 px-3 py-2">
-					<p class="font-mono text-[11px] uppercase tracking-[0.14em] text-hud-text">Glow = EPSS</p>
-					<p class="mt-1 text-xs text-hud-text-secondary">Brighter nodes are more likely to be exploited.</p>
-				</div>
-			</div>
-		</div>
 	</div>
 
 	{#if showGuide}
-		<div class="mt-4 grid gap-3 border-t border-hud-border pt-4 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)]">
+		<div class="mt-3 grid gap-3 border-t border-hud-border pt-3 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)]">
 			<div class="space-y-3">
 				<div>
 					<p class="hud-header">Visual Encoding</p>
@@ -113,24 +82,40 @@ const quickStats = $derived([
 
 				<div class="grid gap-3 md:grid-cols-3">
 					<div class="rounded-sm border border-hud-border bg-hud-surface/60 px-3 py-3 text-sm text-hud-text-secondary">
-						<p class="font-mono text-xs uppercase tracking-[0.16em] text-hud-text">Cluster position</p>
-						<p class="mt-2">Targets occupy their own horizontal lanes so dense groups are easy to compare.</p>
+						<p class="font-mono text-xs uppercase tracking-[0.16em] text-hud-text">District layout</p>
+						<p class="mt-2">Each target occupies its own floor plate, so risky neighborhoods separate cleanly.</p>
 					</div>
 
 					<div class="rounded-sm border border-hud-border bg-hud-surface/60 px-3 py-3 text-sm text-hud-text-secondary">
-						<p class="font-mono text-xs uppercase tracking-[0.16em] text-hud-text">Severity color</p>
-						<p class="mt-2">Warm colors call attention first; use them to find the riskiest pockets before drilling in.</p>
+						<p class="font-mono text-xs uppercase tracking-[0.16em] text-hud-text">Column height</p>
+						<p class="mt-2">Taller monoliths carry higher DECREE urgency, turning the scene into an actionable skyline.</p>
 					</div>
 
 					<div class="rounded-sm border border-hud-border bg-hud-surface/60 px-3 py-3 text-sm text-hud-text-secondary">
-						<p class="font-mono text-xs uppercase tracking-[0.16em] text-hud-text">Glow intensity</p>
-						<p class="mt-2">Brightness refines priority inside a severity band when multiple nodes sit near the same height.</p>
+						<p class="font-mono text-xs uppercase tracking-[0.16em] text-hud-text">Color and glow</p>
+						<p class="mt-2">Color identifies severity first, then glow intensity separates exploit likelihood inside the same band.</p>
 					</div>
 				</div>
 			</div>
 
 			<div class="rounded-sm border border-hud-border bg-hud-surface/55 px-3 py-3">
-				<p class="hud-header">Severity mix</p>
+				<p class="hud-header">Reading keys</p>
+				<div class="mt-3 grid gap-2 sm:grid-cols-3 xl:grid-cols-1">
+					<div class="rounded-sm border border-hud-border/70 bg-hud-base/45 px-3 py-2">
+						<p class="font-mono text-[11px] uppercase tracking-[0.14em] text-hud-text">Column = instance</p>
+						<p class="mt-1 text-xs text-hud-text-secondary">Each monolith maps to one vulnerable package instance.</p>
+					</div>
+					<div class="rounded-sm border border-hud-border/70 bg-hud-base/45 px-3 py-2">
+						<p class="font-mono text-[11px] uppercase tracking-[0.14em] text-hud-text">Height = DECREE</p>
+						<p class="mt-1 text-xs text-hud-text-secondary">Scan upward for higher urgency.</p>
+					</div>
+					<div class="rounded-sm border border-hud-border/70 bg-hud-base/45 px-3 py-2">
+						<p class="font-mono text-[11px] uppercase tracking-[0.14em] text-hud-text">Glow = EPSS</p>
+						<p class="mt-1 text-xs text-hud-text-secondary">Brighter nodes are more likely to be exploited.</p>
+					</div>
+				</div>
+
+				<p class="mt-4 hud-header">Severity mix</p>
 				<div class="mt-3 space-y-2">
 					{#each summary.severityBreakdown as item}
 						<div class="grid grid-cols-[5.5rem_minmax(0,1fr)_2rem] items-center gap-2 text-xs text-hud-text-secondary">

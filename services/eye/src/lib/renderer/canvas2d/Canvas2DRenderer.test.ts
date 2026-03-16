@@ -92,7 +92,10 @@ describe('Canvas2DRenderer', () => {
 
 	it('removes event listeners from canvas on dispose', () => {
 		renderer.mount(container);
-		const canvas = container.querySelector('canvas')!;
+		const canvas = container.querySelector('canvas');
+		if (!canvas) {
+			throw new Error('Expected canvas element to be mounted');
+		}
 		const removeSpy = vi.spyOn(canvas, 'removeEventListener');
 		renderer.dispose();
 

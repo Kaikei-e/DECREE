@@ -79,20 +79,20 @@ const maxDate = $derived(new Date().toISOString());
 
 					<div class="relative min-h-[30rem] flex-1 overflow-hidden hud-panel hud-scanlines bg-hud-void/96">
 						<div class="absolute left-4 top-4 z-10 max-w-xs rounded-sm border border-hud-border bg-hud-base/76 px-3 py-2 backdrop-blur">
-							<p class="hud-header">Spatial Inspection</p>
+							<p class="hud-header">Threat Skyline</p>
 							<p class="mt-1 text-xs leading-5 text-hud-text-secondary">
-								Drag to orbit, use the camera tools for fast resets, and read the scene from cluster
-								shape before drilling into a node.
+								Drag to orbit, read the tallest districts first, and use the camera tools to compare
+								risk neighborhoods before drilling into a node.
 							</p>
 						</div>
 
 						<div class="absolute bottom-4 left-4 z-10 rounded-sm border border-hud-border bg-hud-base/72 px-3 py-2 backdrop-blur">
 							<p class="hud-header">Read Order</p>
 							<p class="mt-1 text-[11px] uppercase tracking-[0.14em] text-hud-text-secondary">
-								Left to right = target lanes
+								Left to right = target districts
 							</p>
 							<p class="mt-1 text-[11px] uppercase tracking-[0.14em] text-hud-text-secondary">
-								Low to high = DECREE urgency
+								Low to high = DECREE skyline
 							</p>
 						</div>
 
@@ -109,7 +109,7 @@ const maxDate = $derived(new Date().toISOString());
 						</div>
 
 						<div class="absolute bottom-4 right-4 z-10 flex flex-wrap justify-end gap-2 text-[11px] uppercase tracking-[0.14em] text-hud-text-secondary">
-							<span class="rounded-sm border border-hud-border bg-hud-base/72 px-2 py-1 backdrop-blur">Orb = instance</span>
+							<span class="rounded-sm border border-hud-border bg-hud-base/72 px-2 py-1 backdrop-blur">Column = instance</span>
 							<span class="rounded-sm border border-hud-border bg-hud-base/72 px-2 py-1 backdrop-blur">Color = severity</span>
 							<span class="rounded-sm border border-hud-border bg-hud-base/72 px-2 py-1 backdrop-blur">Glow = EPSS</span>
 						</div>

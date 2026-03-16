@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { GraphModel } from '$lib/graph/model';
 
 const mockForceContextLoss = vi.fn();
 const mockRendererDispose = vi.fn();
@@ -84,6 +85,72 @@ const { ThreeSceneRenderer } = await import('./ThreeSceneRenderer');
 describe('ThreeSceneRenderer', () => {
 	let container: HTMLElement;
 	let renderer: InstanceType<typeof ThreeSceneRenderer>;
+	type RendererInternals = {
+		instancedMesh: { geometry: { type: string } } | null;
+		districtGroup: { children: unknown[] } | null;
+	};
+	const sampleGraph: GraphModel = {
+		nodes: new Map([
+			[
+				'node-1',
+				{
+					id: 'node-1',
+					targetId: 'target-1',
+					targetName: 'FIM',
+					packageName: 'pkg-a',
+					packageVersion: '1.0.0',
+					ecosystem: 'npm',
+					advisoryId: 'CVE-2025-0001',
+					severity: 'CRITICAL',
+					decreeScore: 4.9,
+					epssScore: 0.8,
+					cvssScore: 9.8,
+					depDepth: 0,
+					isActive: true,
+					lastObservedAt: null,
+					position: { x: 0, y: 24.5, z: 0 },
+					visual: {
+						color: '#FF1744',
+						opacity: 0.8,
+						size: 1,
+						pulse: true,
+						isNew: false,
+						isDisappearing: false,
+					},
+				},
+			],
+			[
+				'node-2',
+				{
+					id: 'node-2',
+					targetId: 'target-1',
+					targetName: 'FIM',
+					packageName: 'pkg-b',
+					packageVersion: '2.0.0',
+					ecosystem: 'npm',
+					advisoryId: 'CVE-2025-0002',
+					severity: 'HIGH',
+					decreeScore: 4.2,
+					epssScore: 0.4,
+					cvssScore: 8.2,
+					depDepth: 0,
+					isActive: true,
+					lastObservedAt: null,
+					position: { x: 1.4, y: 21, z: 0.6 },
+					visual: {
+						color: '#FF9100',
+						opacity: 0.55,
+						size: 1,
+						pulse: false,
+						isNew: false,
+						isDisappearing: false,
+					},
+				},
+			],
+		]),
+		edges: [],
+		clusters: [{ id: 'target-1', name: 'FIM', nodes: ['node-1', 'node-2'], centerX: 0.7 }],
+	};
 
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -100,8 +167,13 @@ describe('ThreeSceneRenderer', () => {
 		expect(mockForceContextLoss).toHaveBeenCalledOnce();
 		expect(mockRendererDispose).toHaveBeenCalledOnce();
 
-		const forceLossOrder = mockForceContextLoss.mock.invocationCallOrder[0]!;
-		const disposeOrder = mockRendererDispose.mock.invocationCallOrder[0]!;
+		const forceLossOrder = mockForceContextLoss.mock.invocationCallOrder[0];
+		const disposeOrder = mockRendererDispose.mock.invocationCallOrder[0];
+		expect(forceLossOrder).toBeDefined();
+		expect(disposeOrder).toBeDefined();
+		if (forceLossOrder === undefined || disposeOrder === undefined) {
+			throw new Error('Expected renderer disposal call order to be recorded');
+		}
 		expect(forceLossOrder).toBeLessThan(disposeOrder);
 	});
 
@@ -175,6 +247,27 @@ describe('ThreeSceneRenderer', () => {
 		renderer.mount(container);
 		renderer.setViewPreset('front');
 		expect(frontPreset).toHaveBeenCalled();
+		renderer.dispose();
+	});
+
+	it('renders nodes as skyline columns instead of spheres', () => {
+		renderer.mount(container);
+		renderer.setGraphModel(sampleGraph);
+
+		const instancedMesh = (renderer as unknown as RendererInternals).instancedMesh;
+		expect(instancedMesh?.geometry.type).toBe('CylinderGeometry');
+
+		renderer.dispose();
+	});
+
+	it('adds district meshes for target groups', () => {
+		renderer.mount(container);
+		renderer.setGraphModel(sampleGraph);
+
+		const districtGroup = (renderer as unknown as RendererInternals).districtGroup;
+		expect(districtGroup).toBeTruthy();
+		expect(districtGroup?.children.length).toBeGreaterThan(0);
+
 		renderer.dispose();
 	});
 });
