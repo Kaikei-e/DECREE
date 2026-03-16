@@ -87,7 +87,7 @@ const maxDate = $derived(new Date().toISOString());
 		</div>
 	{:else}
 		<!-- Main visualization area -->
-		<div class="relative flex-1">
+		<div class="relative min-h-0 flex-1 overflow-hidden">
 			<VisualizationCanvas
 				graphModel={appState.graphModel}
 				rendererType={appState.rendererType}

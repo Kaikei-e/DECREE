@@ -1,5 +1,5 @@
 <script lang="ts">
-import { onDestroy, onMount } from 'svelte';
+import { onDestroy } from 'svelte';
 import { page } from '$app/state';
 import { api } from '$lib/api/client';
 import { computeLayout } from '$lib/graph/layout';
@@ -10,36 +10,57 @@ let { children } = $props();
 
 const projectId = $derived(page.params.projectId);
 
-onMount(() => loadProject());
-
+// Load project metadata (targets, topRisks) + connect SSE on project change
 $effect(() => {
 	const id = projectId;
-	if (id) loadProject();
+	if (id) loadProject(id);
 });
 
-async function loadProject() {
-	if (!projectId) return;
+// Re-fetch findings when filters change
+$effect(() => {
+	// Read each filter property to establish Svelte 5 fine-grained tracking
+	const _severity = appState.filters.severity;
+	const _ecosystem = appState.filters.ecosystem;
+	const _minEpss = appState.filters.minEpss;
+	const _activeOnly = appState.filters.activeOnly;
+	const id = appState.selectedProjectId;
+	if (id) loadFindings(id);
+});
+
+async function loadProject(id: string) {
 	appState.loading = true;
 	appState.error = null;
 
 	try {
-		appState.selectedProjectId = projectId;
+		appState.selectedProjectId = id;
 
-		const [targets, findingsRes, topRisks] = await Promise.all([
-			api.getTargets(projectId),
-			api.getFindings(projectId, { active_only: appState.filters.activeOnly }),
-			api.getTopRisks(projectId),
+		const [targets, topRisks] = await Promise.all([
+			api.getTargets(id),
+			api.getTopRisks(id),
 		]);
 
 		appState.targets = targets;
-		appState.findings = findingsRes.data;
-		appState.graphModel = computeLayout(findingsRes.data, targets);
-
-		sseManager.connect(projectId);
+		await loadFindings(id);
+		sseManager.connect(id);
 	} catch (e) {
 		appState.error = e instanceof Error ? e.message : 'Failed to load project';
 	} finally {
 		appState.loading = false;
+	}
+}
+
+async function loadFindings(id: string) {
+	try {
+		const findingsRes = await api.getFindings(id, {
+			severity: appState.filters.severity,
+			ecosystem: appState.filters.ecosystem,
+			min_epss: appState.filters.minEpss,
+			active_only: appState.filters.activeOnly,
+		});
+		appState.findings = findingsRes.data;
+		appState.graphModel = computeLayout(findingsRes.data, appState.targets);
+	} catch (e) {
+		appState.error = e instanceof Error ? e.message : 'Failed to load findings';
 	}
 }
 
