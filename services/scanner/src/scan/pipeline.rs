@@ -3,10 +3,11 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::adapter::TargetAdapter;
+use crate::db::models::NewObservation;
 use crate::db::queries;
 use crate::enrichment::score;
 use crate::error::{Result, ScannerError};
-use crate::osv::client::{advisory_source, OsvClient};
+use crate::osv::client::{OsvClient, advisory_source};
 
 pub struct ScanPipeline {
     pool: PgPool,
@@ -49,13 +50,9 @@ impl ScanPipeline {
                 error!(scan_id = %scan_id, job_id = %job_id, error = %e, "scan failed");
                 let err_msg = e.to_string();
                 let _ = queries::fail_scan(&self.pool, scan_id, &err_msg).await;
-                let _ = queries::update_scan_job_status(
-                    &self.pool,
-                    job_id,
-                    "failed",
-                    Some(&err_msg),
-                )
-                .await;
+                let _ =
+                    queries::update_scan_job_status(&self.pool, job_id, "failed", Some(&err_msg))
+                        .await;
 
                 // Publish failure event
                 let _ = queries::insert_outbox_event(
@@ -81,20 +78,12 @@ impl ScanPipeline {
         target: &crate::db::models::Target,
         job_id: Uuid,
     ) -> Result<()> {
-        // 4. Create tempdir
         let tmp = tempfile::tempdir()?;
         let work_dir = tmp.path();
 
-        // 5. Select adapter
         let adapter = TargetAdapter::from_target(target)?;
-
-        // 6. Prepare (clone/fetch)
         adapter.prepare(target, work_dir).await?;
-
-        // 7. Generate/parse SBOM
         let sbom = adapter.materialize_sbom(target, work_dir).await?;
-
-        // 8. Fingerprint
         let fingerprint = adapter.fingerprint(target, work_dir).await?;
 
         info!(
@@ -103,10 +92,9 @@ impl ScanPipeline {
             "SBOM materialized"
         );
 
-        // 9. Query OSV
         let osv_results = self.osv.query_batch(&sbom.packages).await?;
 
-        // 10. Persist findings in a transaction
+        // Persist findings in a transaction
         let mut tx = self.pool.begin().await.map_err(ScannerError::Database)?;
         let mut finding_count = 0u32;
 
@@ -118,19 +106,13 @@ impl ScanPipeline {
                 let cvss_vector = vuln.extract_cvss_vector().map(|s| s.to_string());
                 let fix_versions = vuln.extract_fix_versions();
 
-                // Look up existing EPSS data (may be NULL if not yet enriched)
-                let epss_row: Option<(f32, f32)> = sqlx::query_as(
-                    "SELECT epss_score, epss_percentile FROM advisory_epss_snapshots WHERE cve_id = $1 ORDER BY epss_date DESC LIMIT 1"
-                )
-                .bind(advisory_id)
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(ScannerError::Database)?;
+                let epss_row = queries::get_latest_epss(&mut *tx, advisory_id)
+                    .await
+                    .map_err(ScannerError::Database)?;
 
                 let epss_score = epss_row.map(|r| r.0);
                 let epss_percentile = epss_row.map(|r| r.1);
 
-                // Compute reachability from target exposure_class + dependency info
                 let reachability = score::reachability_score(
                     target.exposure_class.as_deref(),
                     pkg.is_direct,
@@ -140,85 +122,52 @@ impl ScanPipeline {
                 let decree_score = score::decree_score(cvss, epss_score, reachability);
                 let severity = score::severity_label(cvss);
 
-                // a. Upsert vulnerability_instance
-                let instance_id = sqlx::query_as::<_, (Uuid,)>(
-                    r#"
-                    INSERT INTO vulnerability_instances
-                        (target_id, package_name, package_version, ecosystem, advisory_id, advisory_source)
-                    VALUES ($1, $2, $3, $4, $5, $6)
-                    ON CONFLICT (target_id, package_name, package_version, ecosystem, advisory_id)
-                    DO UPDATE SET advisory_source = EXCLUDED.advisory_source
-                    RETURNING id
-                    "#,
+                let instance_id = queries::upsert_vulnerability_instance(
+                    &mut *tx,
+                    target.id,
+                    &pkg.name,
+                    &pkg.version,
+                    pkg.ecosystem.as_osv_str(),
+                    advisory_id,
+                    source,
                 )
-                .bind(target.id)
-                .bind(&pkg.name)
-                .bind(&pkg.version)
-                .bind(pkg.ecosystem.as_osv_str())
-                .bind(advisory_id)
-                .bind(source)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(ScannerError::Database)?
-                .0;
-
-                // b. Insert observation
-                sqlx::query(
-                    r#"
-                    INSERT INTO vulnerability_observations
-                        (instance_id, scan_id, cvss_score, cvss_vector, epss_score, epss_percentile, decree_score, severity, reachability, is_direct_dep, dep_depth)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-                    "#,
-                )
-                .bind(instance_id)
-                .bind(scan_id)
-                .bind(cvss)
-                .bind(cvss_vector.as_deref())
-                .bind(epss_score)
-                .bind(epss_percentile)
-                .bind(decree_score)
-                .bind(severity)
-                .bind(Some(reachability))
-                .bind(Some(pkg.is_direct))
-                .bind(Some(pkg.dep_depth as i32))
-                .execute(&mut *tx)
                 .await
                 .map_err(ScannerError::Database)?;
 
-                // c. Fix versions
+                queries::insert_vulnerability_observation(
+                    &mut *tx,
+                    &NewObservation {
+                        instance_id,
+                        scan_id,
+                        cvss_score: cvss,
+                        cvss_vector: cvss_vector.as_deref(),
+                        epss_score,
+                        epss_percentile,
+                        decree_score,
+                        severity,
+                        reachability: Some(reachability),
+                        is_direct_dep: Some(pkg.is_direct),
+                        dep_depth: Some(pkg.dep_depth as i32),
+                    },
+                )
+                .await
+                .map_err(ScannerError::Database)?;
+
                 for fv in &fix_versions {
-                    sqlx::query(
-                        "INSERT INTO advisory_fix_versions (instance_id, fixed_version) VALUES ($1, $2)
-                         ON CONFLICT DO NOTHING",
-                    )
-                    .bind(instance_id)
-                    .bind(fv)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(ScannerError::Database)?;
+                    queries::insert_advisory_fix_version(&mut *tx, instance_id, fv)
+                        .await
+                        .map_err(ScannerError::Database)?;
                 }
 
-                // e. Upsert current_finding_status
-                sqlx::query(
-                    r#"
-                    INSERT INTO current_finding_status
-                        (instance_id, target_id, latest_scan_id, is_active, last_observed_at, last_score, last_severity, updated_at)
-                    VALUES ($1, $2, $3, true, now(), $4, $5, now())
-                    ON CONFLICT (instance_id) DO UPDATE SET
-                        latest_scan_id = EXCLUDED.latest_scan_id,
-                        is_active = true,
-                        last_observed_at = now(),
-                        last_score = EXCLUDED.last_score,
-                        last_severity = EXCLUDED.last_severity,
-                        updated_at = now()
-                    "#,
+                queries::upsert_current_finding_status(
+                    &mut *tx,
+                    instance_id,
+                    target.id,
+                    scan_id,
+                    true,
+                    decree_score,
+                    severity,
                 )
-                .bind(instance_id)
-                .bind(target.id)
-                .bind(scan_id)
-                .bind(decree_score)
-                .bind(severity)
-                .execute(&mut *tx)
                 .await
                 .map_err(ScannerError::Database)?;
 
@@ -226,44 +175,35 @@ impl ScanPipeline {
             }
         }
 
-        // d. Insert dependency edges
         for edge in &sbom.edges {
-            sqlx::query(
-                "INSERT INTO dependency_edges (scan_id, target_id, from_pkg, to_pkg, dep_type)
-                 VALUES ($1, $2, $3, $4, $5)",
+            queries::insert_dependency_edge(
+                &mut *tx,
+                scan_id,
+                target.id,
+                &edge.from_pkg,
+                &edge.to_pkg,
+                &edge.dep_type,
             )
-            .bind(scan_id)
-            .bind(target.id)
-            .bind(&edge.from_pkg)
-            .bind(&edge.to_pkg)
-            .bind(&edge.dep_type)
-            .execute(&mut *tx)
             .await
             .map_err(ScannerError::Database)?;
         }
 
-        // f. Complete scan
-        sqlx::query(
-            "UPDATE scans SET status = 'completed', completed_at = now(), sbom_hash = $2 WHERE id = $1",
-        )
-        .bind(scan_id)
-        .bind(&fingerprint)
-        .execute(&mut *tx)
-        .await
-        .map_err(ScannerError::Database)?;
+        queries::complete_scan(&mut *tx, scan_id, &fingerprint)
+            .await
+            .map_err(ScannerError::Database)?;
 
-        // g. Outbox events
-        sqlx::query("INSERT INTO stream_outbox (stream_name, payload) VALUES ($1, $2)")
-            .bind("scan-events")
-            .bind(serde_json::json!({
+        queries::insert_outbox_event(
+            &mut *tx,
+            "scan-events",
+            &serde_json::json!({
                 "type": "scan.completed",
                 "scan_id": scan_id,
                 "target_id": target.id,
                 "findings_count": finding_count,
-            }))
-            .execute(&mut *tx)
-            .await
-            .map_err(ScannerError::Database)?;
+            }),
+        )
+        .await
+        .map_err(ScannerError::Database)?;
 
         tx.commit().await.map_err(ScannerError::Database)?;
 

@@ -7,7 +7,12 @@ pub fn parse_sbom(data: &[u8]) -> Result<NormalizedSbom> {
     let value: serde_json::Value =
         serde_json::from_slice(data).map_err(|e| ScannerError::SbomParse(e.to_string()))?;
 
-    if value.get("bomFormat").is_some() || value.get("$schema").and_then(|s| s.as_str()).is_some_and(|s| s.contains("cyclonedx")) {
+    if value.get("bomFormat").is_some()
+        || value
+            .get("$schema")
+            .and_then(|s| s.as_str())
+            .is_some_and(|s| s.contains("cyclonedx"))
+    {
         return super::cyclonedx::parse_cyclonedx(data);
     }
 

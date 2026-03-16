@@ -12,9 +12,10 @@ pub struct SbomTargetAdapter;
 
 impl SbomTargetAdapter {
     pub async fn prepare(&self, target: &Target, work_dir: &Path) -> Result<()> {
-        let source = target.source_ref.as_deref().ok_or_else(|| {
-            ScannerError::TargetAccess("sbom target missing source_ref".into())
-        })?;
+        let source = target
+            .source_ref
+            .as_deref()
+            .ok_or_else(|| ScannerError::TargetAccess("sbom target missing source_ref".into()))?;
 
         // If source looks like a URL, fetch it
         if source.starts_with("http://") || source.starts_with("https://") {

@@ -5,10 +5,11 @@ use sqlx::PgPool;
 use tokio::sync::Semaphore;
 use tracing::{info, warn};
 
-use crate::error::{Result, ScannerError};
 use super::types::{NvdCve, NvdCveResponse};
+use crate::error::{Result, ScannerError};
 
 const NVD_API_URL: &str = "https://services.nvd.nist.gov/rest/json/cves/2.0";
+
 pub struct NvdClient {
     http: reqwest::Client,
     api_key: Option<String>,
@@ -26,24 +27,10 @@ impl NvdClient {
         };
 
         Self {
-            http: reqwest::Client::builder()
-                .user_agent("decree-scanner/0.1")
-                .timeout(Duration::from_secs(30))
-                .build()
-                .expect("failed to build HTTP client"),
+            http: crate::http::default_client(),
             api_key,
             rate_semaphore: Arc::new(Semaphore::new(permits)),
             rate_window: window,
-        }
-    }
-
-    #[cfg(test)]
-    fn with_client(http: reqwest::Client, api_key: Option<String>) -> Self {
-        Self {
-            http,
-            api_key,
-            rate_semaphore: Arc::new(Semaphore::new(100)),
-            rate_window: Duration::from_millis(1),
         }
     }
 
@@ -83,7 +70,9 @@ impl NvdClient {
         if status == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
         }
-        if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        if status == reqwest::StatusCode::FORBIDDEN
+            || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        {
             warn!(status = %status, cve_id, "NVD API rate limited or forbidden");
             return Err(ScannerError::NvdApi(format!("NVD API returned {status}")));
         }
@@ -99,7 +88,11 @@ impl NvdClient {
             .await
             .map_err(|e| ScannerError::NvdApi(e.to_string()))?;
 
-        Ok(nvd_response.vulnerabilities.into_iter().next().map(|w| w.cve))
+        Ok(nvd_response
+            .vulnerabilities
+            .into_iter()
+            .next()
+            .map(|w| w.cve))
     }
 
     /// Sync NVD data for all CVE-* advisory IDs in vulnerability_instances.
@@ -203,8 +196,8 @@ impl NvdClient {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::*;
+    use super::*;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 

@@ -1,14 +1,11 @@
-use std::time::Duration;
-
 use sqlx::PgPool;
 use tracing::info;
 
-use crate::error::{Result, ScannerError};
 use super::types::{EpssApiResponse, EpssEntry};
+use crate::error::{Result, ScannerError};
 
 const EPSS_API_URL: &str = "https://api.first.org/data/v1/epss";
 const CHUNK_SIZE: usize = 100;
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct EpssClient {
     http: reqwest::Client,
@@ -23,17 +20,8 @@ impl Default for EpssClient {
 impl EpssClient {
     pub fn new() -> Self {
         Self {
-            http: reqwest::Client::builder()
-                .user_agent("decree-scanner/0.1")
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .expect("failed to build HTTP client"),
+            http: crate::http::default_client(),
         }
-    }
-
-    #[cfg(test)]
-    fn with_client(http: reqwest::Client) -> Self {
-        Self { http }
     }
 
     /// Fetch EPSS data for a batch of CVE IDs.
@@ -128,7 +116,11 @@ impl EpssClient {
             }
         }
 
-        info!(inserted, total_fetched = entries.len(), "EPSS sync complete");
+        info!(
+            inserted,
+            total_fetched = entries.len(),
+            "EPSS sync complete"
+        );
         Ok(inserted)
     }
 }
@@ -172,10 +164,7 @@ mod tests {
             .await;
 
         let client = EpssClient::new();
-        let cves = vec![
-            "CVE-2024-1234".to_string(),
-            "CVE-2024-5678".to_string(),
-        ];
+        let cves = vec!["CVE-2024-1234".to_string(), "CVE-2024-5678".to_string()];
 
         let url = format!("{}/data/v1/epss", server.uri());
         let entries = client.fetch_batch_from(&url, &cves).await.unwrap();

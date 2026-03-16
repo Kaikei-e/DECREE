@@ -48,10 +48,7 @@ pub fn parse_spdx(data: &[u8]) -> Result<NormalizedSbom> {
     let direct_ids: std::collections::HashSet<&str> = doc
         .relationships
         .iter()
-        .filter(|r| {
-            r.relationship_type == "DEPENDS_ON"
-                && r.spdx_element_id == "SPDXRef-DOCUMENT"
-        })
+        .filter(|r| r.relationship_type == "DEPENDS_ON" && r.spdx_element_id == "SPDXRef-DOCUMENT")
         .map(|r| r.related_spdx_element.as_str())
         .collect();
 

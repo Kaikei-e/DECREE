@@ -248,7 +248,10 @@ mod tests {
             "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:N/SC:N/SI:N/SA:N",
         );
         let score = vuln.extract_cvss_score().expect("should parse v4 vector");
-        assert!((score - 0.0).abs() < 0.01, "no-impact v4 should be 0, got {score}");
+        assert!(
+            (score - 0.0).abs() < 0.01,
+            "no-impact v4 should be 0, got {score}"
+        );
     }
 
     #[test]
@@ -271,7 +274,10 @@ mod tests {
             affected: vec![],
         };
         let score = vuln.extract_cvss_score().expect("should prefer v3");
-        assert!((score - 9.8).abs() < 0.1, "should use v3 score ~9.8, got {score}");
+        assert!(
+            (score - 9.8).abs() < 0.1,
+            "should use v3 score ~9.8, got {score}"
+        );
     }
 
     #[test]
@@ -287,8 +293,14 @@ mod tests {
                     ranges: vec![OsvRange {
                         range_type: "ECOSYSTEM".to_string(),
                         events: vec![
-                            OsvEvent { introduced: Some("0".to_string()), fixed: Some("7.9.4".to_string()) },
-                            OsvEvent { introduced: None, fixed: Some("2.17.2".to_string()) },
+                            OsvEvent {
+                                introduced: Some("0".to_string()),
+                                fixed: Some("7.9.4".to_string()),
+                            },
+                            OsvEvent {
+                                introduced: None,
+                                fixed: Some("2.17.2".to_string()),
+                            },
                         ],
                     }],
                 },
@@ -297,8 +309,14 @@ mod tests {
                     ranges: vec![OsvRange {
                         range_type: "ECOSYSTEM".to_string(),
                         events: vec![
-                            OsvEvent { introduced: Some("0".to_string()), fixed: Some("7.9.4".to_string()) },
-                            OsvEvent { introduced: None, fixed: Some("2.17.2".to_string()) },
+                            OsvEvent {
+                                introduced: Some("0".to_string()),
+                                fixed: Some("7.9.4".to_string()),
+                            },
+                            OsvEvent {
+                                introduced: None,
+                                fixed: Some("2.17.2".to_string()),
+                            },
                         ],
                     }],
                 },

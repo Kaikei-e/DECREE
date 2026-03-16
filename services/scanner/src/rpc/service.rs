@@ -13,11 +13,9 @@ use crate::enrichment::projection::ProjectionUpdater;
 use crate::scan::pipeline::ScanPipeline;
 
 use super::proto::{
-    GetScanStatusRequest, GetScanStatusResponse, RunScanRequest, RunScanResponse,
-    SyncEpssRequest, SyncEpssResponse,
-    SyncNvdRequest, SyncNvdResponse,
-    SyncExploitDbRequest, SyncExploitDbResponse,
-    RecalculateScoresRequest, RecalculateScoresResponse,
+    GetScanStatusRequest, GetScanStatusResponse, RecalculateScoresRequest,
+    RecalculateScoresResponse, RunScanRequest, RunScanResponse, SyncEpssRequest, SyncEpssResponse,
+    SyncExploitDbRequest, SyncExploitDbResponse, SyncNvdRequest, SyncNvdResponse,
 };
 
 // ── Scanner Service ─────────────────────────────────────────
@@ -71,6 +69,7 @@ impl ScannerRpcService {
             message: "invalid scan_id UUID".to_string(),
         })?;
 
+        // Keep explicit mapping for NotFound vs Internal
         let job = queries::get_scan_job(&self.pool, job_id)
             .await
             .map_err(|e| match e {
@@ -88,10 +87,7 @@ impl ScannerRpcService {
             scan_id: job.id.to_string(),
             status: job.status,
             started_at: job.started_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
-            completed_at: job
-                .completed_at
-                .map(|t| t.to_rfc3339())
-                .unwrap_or_default(),
+            completed_at: job.completed_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
             error_message: job.error_message.unwrap_or_default(),
         })
     }
@@ -123,16 +119,7 @@ impl EnrichmentRpcService {
 
     pub async fn sync_epss(&self, _req: SyncEpssRequest) -> Result<SyncEpssResponse, ConnectError> {
         info!("EnrichmentService: SyncEpss called");
-
-        let count = self
-            .epss
-            .sync_known_cves(&self.pool)
-            .await
-            .map_err(|e| ConnectError {
-                code: ConnectCode::Internal,
-                message: format!("EPSS sync failed: {e}"),
-            })?;
-
+        let count = self.epss.sync_known_cves(&self.pool).await?;
         Ok(SyncEpssResponse {
             synced_count: count,
         })
@@ -140,16 +127,7 @@ impl EnrichmentRpcService {
 
     pub async fn sync_nvd(&self, _req: SyncNvdRequest) -> Result<SyncNvdResponse, ConnectError> {
         info!("EnrichmentService: SyncNvd called");
-
-        let count = self
-            .nvd
-            .sync_known_cves(&self.pool)
-            .await
-            .map_err(|e| ConnectError {
-                code: ConnectCode::Internal,
-                message: format!("NVD sync failed: {e}"),
-            })?;
-
+        let count = self.nvd.sync_known_cves(&self.pool).await?;
         Ok(SyncNvdResponse {
             synced_count: count,
         })
@@ -160,13 +138,8 @@ impl EnrichmentRpcService {
         _req: SyncExploitDbRequest,
     ) -> Result<SyncExploitDbResponse, ConnectError> {
         info!("EnrichmentService: SyncExploitDb called");
-
         let sync = ExploitDbSync::new(self.exploitdb_repo_path.as_deref());
-        let (exploits, links) = sync.run(&self.pool).await.map_err(|e| ConnectError {
-            code: ConnectCode::Internal,
-            message: format!("Exploit-DB sync failed: {e}"),
-        })?;
-
+        let (exploits, links) = sync.run(&self.pool).await?;
         Ok(SyncExploitDbResponse {
             exploits_synced: exploits,
             links_synced: links,
@@ -177,19 +150,16 @@ impl EnrichmentRpcService {
         &self,
         req: RecalculateScoresRequest,
     ) -> Result<RecalculateScoresResponse, ConnectError> {
-        info!(cve_count = req.cve_ids.len(), "EnrichmentService: RecalculateScores called");
-
+        info!(
+            cve_count = req.cve_ids.len(),
+            "EnrichmentService: RecalculateScores called"
+        );
         let updater = ProjectionUpdater::new(self.pool.clone());
         let count = if req.cve_ids.is_empty() {
             updater.recalculate_all().await
         } else {
             updater.recalculate_for_cves(&req.cve_ids).await
-        }
-        .map_err(|e| ConnectError {
-            code: ConnectCode::Internal,
-            message: format!("score recalculation failed: {e}"),
-        })?;
-
+        }?;
         Ok(RecalculateScoresResponse {
             updated_count: count,
         })

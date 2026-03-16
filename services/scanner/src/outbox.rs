@@ -3,6 +3,8 @@ use sqlx::PgPool;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
+use crate::error::Result;
+
 /// Polls `stream_outbox` for unpublished events and pushes them to Redis Streams.
 pub struct OutboxPublisher {
     pool: PgPool,
@@ -55,10 +57,7 @@ impl OutboxPublisher {
         }
     }
 
-    async fn publish_pending(
-        &self,
-        conn: &mut redis::aio::MultiplexedConnection,
-    ) -> anyhow::Result<()> {
+    async fn publish_pending(&self, conn: &mut redis::aio::MultiplexedConnection) -> Result<()> {
         let rows = sqlx::query_as::<_, OutboxRow>(
             "SELECT id, stream_name, payload FROM stream_outbox WHERE published = false ORDER BY created_at LIMIT 100",
         )
@@ -70,11 +69,7 @@ impl OutboxPublisher {
 
             // XADD <stream> * payload <json>
             let _: String = conn
-                .xadd(
-                    &row.stream_name,
-                    "*",
-                    &[("payload", payload_str.as_str())],
-                )
+                .xadd(&row.stream_name, "*", &[("payload", payload_str.as_str())])
                 .await?;
 
             sqlx::query("UPDATE stream_outbox SET published = true WHERE id = $1")

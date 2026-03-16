@@ -1,8 +1,9 @@
 use sqlx::PgPool;
 use tracing::info;
 
-use crate::error::{Result, ScannerError};
 use super::score;
+use crate::db::queries;
+use crate::error::{Result, ScannerError};
 
 pub struct ProjectionUpdater {
     pool: PgPool,
@@ -167,15 +168,14 @@ impl ProjectionUpdater {
 
         // Publish outbox event
         if updated > 0 {
-            let _ = sqlx::query(
-                "INSERT INTO stream_outbox (stream_name, payload) VALUES ($1, $2)",
+            let _ = queries::insert_outbox_event(
+                &self.pool,
+                "enrichment-events",
+                &serde_json::json!({
+                    "type": "scores.recalculated",
+                    "updated_count": updated,
+                }),
             )
-            .bind("enrichment-events")
-            .bind(serde_json::json!({
-                "type": "scores.recalculated",
-                "updated_count": updated,
-            }))
-            .execute(&self.pool)
             .await;
         }
 

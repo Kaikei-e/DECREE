@@ -1,11 +1,12 @@
 pub mod adapter;
 pub mod config;
+pub mod connect;
 pub mod db;
 pub mod enrichment;
 pub mod error;
-pub mod connect;
-pub mod rpc;
+pub mod http;
 pub mod osv;
 pub mod outbox;
+pub mod rpc;
 pub mod sbom;
 pub mod scan;

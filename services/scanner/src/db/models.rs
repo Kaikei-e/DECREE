@@ -34,3 +34,18 @@ pub struct Scan {
     pub status: String,
     pub sbom_hash: Option<String>,
 }
+
+/// Parameters for inserting a new vulnerability observation.
+pub struct NewObservation<'a> {
+    pub instance_id: Uuid,
+    pub scan_id: Uuid,
+    pub cvss_score: Option<f32>,
+    pub cvss_vector: Option<&'a str>,
+    pub epss_score: Option<f32>,
+    pub epss_percentile: Option<f32>,
+    pub decree_score: Option<f32>,
+    pub severity: &'a str,
+    pub reachability: Option<f32>,
+    pub is_direct_dep: Option<bool>,
+    pub dep_depth: Option<i32>,
+}

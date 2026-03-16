@@ -19,12 +19,9 @@ impl ContainerTargetAdapter {
         target: &Target,
         _work_dir: &Path,
     ) -> Result<NormalizedSbom> {
-        let image = target
-            .source_ref
-            .as_deref()
-            .ok_or_else(|| {
-                ScannerError::TargetAccess("container target missing source_ref (image)".into())
-            })?;
+        let image = target.source_ref.as_deref().ok_or_else(|| {
+            ScannerError::TargetAccess("container target missing source_ref (image)".into())
+        })?;
 
         info!(image, "running syft on container image");
 

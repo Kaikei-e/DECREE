@@ -78,21 +78,19 @@ async fn test_scan_pipeline_with_sbom_target() {
     match result {
         Ok(scan_id) => {
             // Verify scan completed
-            let scan: (String,) =
-                sqlx::query_as("SELECT status FROM scans WHERE id = $1")
-                    .bind(scan_id)
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap();
+            let scan: (String,) = sqlx::query_as("SELECT status FROM scans WHERE id = $1")
+                .bind(scan_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
             assert_eq!(scan.0, "completed");
 
             // Verify job completed
-            let job: (String,) =
-                sqlx::query_as("SELECT status FROM scan_jobs WHERE id = $1")
-                    .bind(job_id)
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap();
+            let job: (String,) = sqlx::query_as("SELECT status FROM scan_jobs WHERE id = $1")
+                .bind(job_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
             assert_eq!(job.0, "completed");
 
             // Verify outbox event was created

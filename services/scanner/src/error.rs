@@ -34,6 +34,12 @@ pub enum ScannerError {
 
     #[error("Exploit-DB error: {0}")]
     ExploitDb(String),
+
+    #[error("Redis error: {0}")]
+    Redis(#[from] redis::RedisError),
+
+    #[error("configuration error: {0}")]
+    Config(String),
 }
 
 pub type Result<T> = std::result::Result<T, ScannerError>;

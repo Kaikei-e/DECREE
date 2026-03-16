@@ -5,10 +5,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 1: compile protos with prost, emitting a file descriptor set
     let mut config = prost_build::Config::new();
     config.file_descriptor_set_path(&descriptor_path);
-    config.compile_protos(
-        &["../../proto/scanner/v1/scanner.proto"],
-        &["../../proto"],
-    )?;
+    config.compile_protos(&["../../proto/scanner/v1/scanner.proto"], &["../../proto"])?;
 
     // Step 2: generate serde impls from the descriptor set
     let descriptor_set = std::fs::read(&descriptor_path)?;

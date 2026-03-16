@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::error::{Result, ScannerError};
 
 #[derive(Debug, Clone)]
 pub struct ScannerConfig {
@@ -13,7 +13,7 @@ impl ScannerConfig {
     pub fn from_env() -> Result<Self> {
         Ok(Self {
             database_url: std::env::var("DATABASE_URL")
-                .context("DATABASE_URL must be set")?,
+                .map_err(|_| ScannerError::Config("DATABASE_URL must be set".into()))?,
             redis_url: std::env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string()),
             listen_addr: std::env::var("LISTEN_ADDR")

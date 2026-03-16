@@ -1,18 +1,14 @@
-use std::time::Duration;
-
 use tracing::{info, warn};
 
 use crate::error::{Result, ScannerError};
 use crate::osv::types::{
-    OsvBatchRequest, OsvBatchResponse, OsvBatchResult, OsvQuery, OsvQueryPackage,
-    OsvVulnerability,
+    OsvBatchRequest, OsvBatchResponse, OsvBatchResult, OsvQuery, OsvQueryPackage, OsvVulnerability,
 };
 use crate::sbom::model::NormalizedPackage;
 
 const OSV_BATCH_URL: &str = "https://api.osv.dev/v1/querybatch";
 const OSV_VULN_URL: &str = "https://api.osv.dev/v1/vulns";
 const BATCH_CHUNK_SIZE: usize = 1000;
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct OsvClient {
     http: reqwest::Client,
@@ -27,20 +23,13 @@ impl Default for OsvClient {
 impl OsvClient {
     pub fn new() -> Self {
         Self {
-            http: reqwest::Client::builder()
-                .user_agent("decree-scanner/0.1")
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .expect("failed to build HTTP client"),
+            http: crate::http::default_client(),
         }
     }
 
     /// Query OSV for vulnerabilities affecting the given packages.
     /// Returns one `OsvBatchResult` per input package (in the same order).
-    pub async fn query_batch(
-        &self,
-        packages: &[NormalizedPackage],
-    ) -> Result<Vec<OsvBatchResult>> {
+    pub async fn query_batch(&self, packages: &[NormalizedPackage]) -> Result<Vec<OsvBatchResult>> {
         if packages.is_empty() {
             return Ok(Vec::new());
         }
@@ -137,7 +126,11 @@ impl OsvClient {
             let mut batch_iter = batch.results.into_iter();
             for i in 0..chunk.len() {
                 if queryable_indices.contains(&i) {
-                    all_results.push(batch_iter.next().unwrap_or(OsvBatchResult { vulns: vec![] }));
+                    all_results.push(
+                        batch_iter
+                            .next()
+                            .unwrap_or(OsvBatchResult { vulns: vec![] }),
+                    );
                 } else {
                     all_results.push(OsvBatchResult { vulns: vec![] });
                 }
@@ -191,7 +184,10 @@ impl OsvClient {
             return Ok(());
         }
 
-        info!(count = ids_to_fetch.len(), "hydrating OSV vulnerabilities with full details");
+        info!(
+            count = ids_to_fetch.len(),
+            "hydrating OSV vulnerabilities with full details"
+        );
 
         let mut full_vulns = std::collections::HashMap::new();
         for id in &ids_to_fetch {
@@ -229,19 +225,6 @@ pub fn advisory_source(vuln_id: &str) -> &str {
     }
 }
 
-/// Map a CVSS score to a severity string.
-#[deprecated(note = "use enrichment::score::severity_label instead")]
-pub fn severity_from_cvss(score: Option<f32>) -> &'static str {
-    crate::enrichment::score::severity_label(score)
-}
-
-/// Compute the M1 provisional DECREE score (EPSS and reachability deferred to M2).
-#[deprecated(note = "use enrichment::score::decree_score instead")]
-pub fn provisional_decree_score(cvss: Option<f32>) -> Option<f32> {
-    // Preserved M1 behavior: cvss * 0.4 only
-    cvss.map(|c| c * 0.4)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,10 +247,7 @@ mod tests {
         let q = &json["queries"][0];
         // purl must be inside "package", not at top level
         assert!(q.get("purl").is_none(), "purl must not be at top level");
-        assert_eq!(
-            q["package"]["purl"],
-            "pkg:golang/github.com/foo/bar@1.0.0"
-        );
+        assert_eq!(q["package"]["purl"], "pkg:golang/github.com/foo/bar@1.0.0");
         // name/ecosystem should be absent
         assert!(q["package"].get("name").is_none());
         assert!(q["package"].get("ecosystem").is_none());
@@ -288,21 +268,6 @@ mod tests {
         assert_eq!(json["package"]["ecosystem"], "npm");
         assert_eq!(json["version"], "4.18.0");
         assert!(json["package"].get("purl").is_none());
-    }
-
-    #[test]
-    fn severity_mapping() {
-        assert_eq!(severity_from_cvss(Some(9.8)), "critical");
-        assert_eq!(severity_from_cvss(Some(7.5)), "high");
-        assert_eq!(severity_from_cvss(Some(5.0)), "medium");
-        assert_eq!(severity_from_cvss(Some(2.0)), "low");
-        assert_eq!(severity_from_cvss(None), "unknown");
-    }
-
-    #[test]
-    fn provisional_score() {
-        let score = provisional_decree_score(Some(9.0));
-        assert!((score.unwrap() - 3.6).abs() < 0.01);
     }
 
     #[test]
