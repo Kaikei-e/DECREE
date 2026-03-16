@@ -1,17 +1,15 @@
 <script lang="ts">
-import { page } from '$app/state';
 import { getFindingDetail } from '$lib/api/client';
 import DetailPanel from '$lib/components/DetailPanel.svelte';
 import FilterBar from '$lib/components/FilterBar.svelte';
 import NodeTooltip from '$lib/components/NodeTooltip.svelte';
+import SceneGuide from '$lib/components/SceneGuide.svelte';
 import TimelineSlider from '$lib/components/TimelineSlider.svelte';
 import TopRisksSummary from '$lib/components/TopRisksSummary.svelte';
 import VisualizationCanvas from '$lib/components/VisualizationCanvas.svelte';
+import { buildVisualizationInsights, getTopVisibleRisks } from '$lib/graph/insights';
 import type { FindingFilters, RendererType } from '$lib/state/app.svelte';
 import { appState } from '$lib/state/app.svelte';
-import { timelineState } from '$lib/state/timeline.svelte';
-
-let { data } = $props();
 
 let hoveredNode = $state<{ id: string; x: number; y: number } | null>(null);
 
@@ -20,6 +18,9 @@ const ecosystems = $derived([...new Set(appState.findings.map((f) => f.ecosystem
 const graphNode = $derived(
 	hoveredNode ? (appState.graphModel.nodes.get(hoveredNode.id) ?? null) : null,
 );
+
+const sceneSummary = $derived(buildVisualizationInsights(appState.findings, appState.graphModel));
+const topVisibleRisks = $derived(getTopVisibleRisks(appState.findings));
 
 function onNodeClick(nodeId: string) {
 	appState.selectedNodeId = nodeId;
@@ -44,7 +45,6 @@ function onRendererChange(type: RendererType) {
 	appState.rendererType = type;
 }
 
-// Timeline date range
 const minDate = $derived(
 	appState.findings.length > 0
 		? appState.findings.reduce(
@@ -56,9 +56,8 @@ const minDate = $derived(
 const maxDate = $derived(new Date().toISOString());
 </script>
 
-<div class="relative flex h-[calc(100vh-3rem)] flex-col">
-	<!-- Filter Bar -->
-	<div class="z-10 p-2">
+<div class="flex h-[calc(100vh-3rem)] flex-col">
+	<div class="z-10 px-2 pb-2 pt-2">
 		<FilterBar
 			filters={appState.filters}
 			rendererType={appState.rendererType}
@@ -73,32 +72,49 @@ const maxDate = $derived(new Date().toISOString());
 			<p class="font-mono text-hud-danger">{appState.error}</p>
 		</div>
 	{:else}
-		<!-- Main visualization area -->
-		<div class="relative min-h-0 flex-1 overflow-hidden">
-			<VisualizationCanvas
-				graphModel={appState.graphModel}
-				rendererType={appState.rendererType}
-				{onNodeClick}
-				{onNodeHover}
-			/>
+		<div class="min-h-0 flex-1 px-2 pb-2">
+			<div class="flex h-full min-h-0 flex-col gap-3">
+				<SceneGuide summary={sceneSummary} rendererType={appState.rendererType} />
 
-			<!-- Top Risks Overlay -->
-			<div class="absolute left-3 top-3 w-56">
-				<TopRisksSummary risks={data.topRisks} onSelect={onNodeClick} />
+				<div class="grid min-h-0 flex-1 gap-3 xl:grid-cols-[21rem_minmax(0,1fr)]">
+					<div class="min-h-0">
+						<TopRisksSummary risks={topVisibleRisks} onSelect={onNodeClick} />
+					</div>
+
+					<div class="relative min-h-[28rem] overflow-hidden hud-panel hud-scanlines bg-hud-void/96">
+						<div class="absolute left-4 top-4 z-10 max-w-sm rounded-sm border border-hud-border bg-hud-base/85 px-4 py-3 backdrop-blur">
+							<p class="hud-header">How To Read This Space</p>
+							<p class="mt-2 text-sm leading-6 text-hud-text">
+								1 orb = 1 finding. Read upward for higher DECREE Score, scan left-to-right by target,
+								and use color plus glow to spot severity and EPSS.
+							</p>
+						</div>
+
+						<div class="absolute bottom-4 left-4 z-10 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.14em] text-hud-text-secondary">
+							<span class="rounded-sm border border-hud-border bg-hud-base/85 px-2 py-1">Clusters = targets</span>
+							<span class="rounded-sm border border-hud-border bg-hud-base/85 px-2 py-1">Height = DECREE</span>
+							<span class="rounded-sm border border-hud-border bg-hud-base/85 px-2 py-1">Brightness = EPSS</span>
+						</div>
+
+						<VisualizationCanvas
+							graphModel={appState.graphModel}
+							rendererType={appState.rendererType}
+							{onNodeClick}
+							{onNodeHover}
+						/>
+
+						<NodeTooltip node={graphNode} x={hoveredNode?.x ?? 0} y={hoveredNode?.y ?? 0} />
+					</div>
+				</div>
 			</div>
-
-			<!-- Node Tooltip -->
-			<NodeTooltip node={graphNode} x={hoveredNode?.x ?? 0} y={hoveredNode?.y ?? 0} />
 		</div>
 
-		<!-- Timeline Slider -->
-		<div class="z-10 p-2">
+		<div class="z-10 px-2 pb-2">
 			<TimelineSlider {minDate} {maxDate} />
 		</div>
 	{/if}
 </div>
 
-<!-- Detail Panel -->
 <DetailPanel
 	finding={appState.selectedFindingDetail}
 	onClose={() => {
