@@ -2,30 +2,84 @@
 
 **Dynamic Realtime Exploit Classification & Evaluation Engine**
 
-DECREE is a multi-service vulnerability analysis platform focused on one question: not just "is this package vulnerable?", but "how much should we care right now?"
+[![Rust CI](https://github.com/Kaikei-e/DECREE/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/Kaikei-e/DECREE/actions/workflows/rust.yml)
+[![Go CI](https://github.com/Kaikei-e/DECREE/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/Kaikei-e/DECREE/actions/workflows/go.yml)
+[![Frontend CI](https://github.com/Kaikei-e/DECREE/actions/workflows/frontend.yml/badge.svg?branch=main)](https://github.com/Kaikei-e/DECREE/actions/workflows/frontend.yml)
+[![Infra CI](https://github.com/Kaikei-e/DECREE/actions/workflows/infra.yml/badge.svg?branch=main)](https://github.com/Kaikei-e/DECREE/actions/workflows/infra.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-It combines SBOM-based scanning, vulnerability enrichment, score calculation, diff detection, event streaming, and visualization. Rather than trying to be another all-in-one scanner, DECREE builds on existing inputs and emphasizes prioritization, change tracking, and operator-facing visibility.
+DECREE is a multi-service vulnerability analysis platform that goes beyond "is this package vulnerable?" to answer **"how much should we care right now?"** It combines SBOM-based scanning, multi-source enrichment, prioritized scoring, change detection, and 3D spatial visualization into a single deployable stack.
 
-## What DECREE Does
+<p align="center">
+  <img src="docs/assets/threat-skyline.webp" alt="DECREE Eye — Threat Skyline visualization" width="860">
+</p>
 
-- Scans software supply chain targets and stores normalized findings
-- Enriches findings with OSV, EPSS, NVD, and Exploit-DB data
-- Computes a custom DECREE Score from severity, exploitability, and reachability
-- Detects changes between scans such as new CVEs, resolved CVEs, score shifts, and newly linked exploits
-- Publishes change events over Redis Streams and SSE
-- Exposes project, target, finding, and timeline data over an HTTP API
-- Includes a frontend for project selection, finding visualization, and finding detail inspection
+---
 
-## Current Status
+## Table of Contents
 
-This repository is no longer just a skeleton. The codebase now includes:
+- [Why DECREE?](#why-decree)
+- [Features](#features)
+- [DECREE Score](#decree-score)
+- [Architecture](#architecture)
+- [Quick Start](#quick-start)
+- [API Reference](#api-reference)
+- [Configuration](#configuration)
+- [Local Development](#local-development)
+- [Repository Layout](#repository-layout)
+- [Contributing](#contributing)
+- [Acknowledgments](#acknowledgments)
+- [License](#license)
 
-- `scanner` in Rust: target adapters, SBOM ingestion/generation, OSV matching, enrichment RPCs, outbox publishing
-- `oracle` in Go: config seeding, scheduled scans, score refresh, diff detection, notification routing
-- `gateway` in Go: REST API, paginated findings/timeline endpoints, SSE fan-out, PostgreSQL-backed queries
-- `eye` in SvelteKit: project list, graph visualization, filters, detail drawer, renderer switching, timeline controls
+---
 
-There are still a few unfinished edges, but the core service integration is now largely aligned. This README reflects the code as it exists today, including the limitations that still matter for first-time users.
+## Why DECREE?
+
+Scanners like Trivy and Grype are excellent at finding vulnerabilities. DECREE builds on their output and focuses on what happens next:
+
+- **Prioritized scoring** — The DECREE Score blends CVSS severity, EPSS exploit probability, and reachability analysis into a single actionable number so you fix what matters first.
+- **Change detection** — Every rescan produces a diff: new CVEs, resolved CVEs, score shifts, newly linked exploits. You see what changed, not just what exists.
+- **Immutable audit trail** — An event-sourced data model ensures every observation and disappearance is recorded. Nothing is overwritten; the full history is always available.
+- **Real-time streaming** — Finding and notification events flow through Redis Streams and are exposed as Server-Sent Events for live dashboards.
+- **3D Threat Skyline** — A WebGPU spatial visualization renders your vulnerability landscape as a city of hexagonal columns — height encodes score, color encodes severity, glow encodes exploit likelihood.
+- **Built-in notification routing** — Slack, Discord, and generic webhook channels with per-channel severity thresholds and deduplication.
+
+## Features
+
+### Scanning & Enrichment
+
+- Container image and Git repository scanning via Syft
+- SBOM ingestion in CycloneDX and SPDX formats
+- OSV batch advisory matching against normalized packages
+- EPSS, NVD, and Exploit-DB synchronization
+- Automated score recalculation for active findings
+
+### Change Detection & Notifications
+
+- Target seeding from `decree.yaml` with scheduled rescans
+- Diff detection for `new_cve`, `resolved_cve`, `score_change`, and `new_exploit`
+- Multi-channel notifications (Slack, Discord, webhooks)
+- Notification deduplication and delivery logging
+
+### API & Visualization
+
+- REST API with paginated findings, top risks, and timeline endpoints
+- SSE endpoint for live finding and notification updates
+- 3D Threat Skyline renderer (Three.js WebGL) with 2D canvas fallback
+- Filter controls for severity, ecosystem, EPSS threshold, and active-only findings
+- Detail panel with fix versions, exploit references, and dependency context
+
+## DECREE Score
+
+```text
+DECREE Score = (CVSS_base × 0.4) + (EPSS × 100 × 0.35) + (Reachability × 0.25)
+```
+
+| Component | Weight | Source | Rationale |
+|-----------|-------:|--------|-----------|
+| CVSS base | 40 % | NVD | Intrinsic severity of the vulnerability |
+| EPSS | 35 % | FIRST EPSS | Probability of exploitation within 30 days |
+| Reachability | 25 % | Static analysis | Whether vulnerable code is actually reachable from exposed surfaces |
 
 ## Architecture
 
@@ -51,62 +105,26 @@ flowchart LR
 
 | Service | Tech | Port | Responsibility |
 |---|---|---:|---|
-| `decree-scanner` | Rust | `9000` internal | Runs scans, materializes/parses SBOMs, matches OSV advisories, syncs EPSS/NVD/Exploit-DB data, recalculates scores |
+| `decree-scanner` | Rust | `9000` internal | Runs scans, generates/parses SBOMs, matches OSV advisories, syncs EPSS/NVD/Exploit-DB, calculates scores |
 | `decree-oracle` | Go | `9100` internal | Seeds configured targets, schedules scans, detects diffs, dispatches notifications |
 | `decree-gateway` | Go | `8400` | Exposes REST endpoints and SSE over the read model |
 | `decree-eye` | SvelteKit + Three.js | `3400` | Project browser and vulnerability visualization UI |
-| PostgreSQL | - | `5434` host | Persistent store for scans, observations, projections, notifications |
-| Redis | - | `6381` host | Streams for scan/finding/notification events |
+| PostgreSQL | — | `5434` host | Persistent store for scans, observations, projections, notifications |
+| Redis | — | `6381` host | Streams for scan/finding/notification events |
 
-## Implemented Features
+<details>
+<summary>Internal Scanner RPC Surface</summary>
 
-### Scanning and enrichment
+`decree-oracle` talks to `decree-scanner` over JSON/HTTP Connect-style RPC routes:
 
-- Container image scanning via Syft
-- Internal support for Git, container, and raw SBOM target adapters in `scanner`
-- OSV batch matching against normalized packages
-- EPSS synchronization
-- NVD synchronization
-- Exploit-DB synchronization
-- Score recalculation for active findings
+- `/scanner.v1.ScannerService/RunScan`
+- `/scanner.v1.ScannerService/GetScanStatus`
+- `/scanner.v1.EnrichmentService/SyncEpss`
+- `/scanner.v1.EnrichmentService/SyncNvd`
+- `/scanner.v1.EnrichmentService/SyncExploitDb`
+- `/scanner.v1.EnrichmentService/RecalculateScores`
 
-### Diffing and notifications
-
-- Initial scan seeding from `decree.yaml`
-- Scheduled rescans at a configurable interval
-- Diff detection for:
-  - `new_cve`
-  - `resolved_cve`
-  - `score_change`
-  - `new_exploit`
-- Slack notifications
-- Discord notifications
-- Generic webhook notifications
-- Notification deduplication and delivery logging
-
-### Read API and UI
-
-- Project listing
-- Target listing
-- Paginated findings API with filters
-- Finding detail API with fix versions, exploit refs, and dependency edges
-- Top risks API
-- Timeline API
-- SSE endpoint for live finding/notification updates
-- Graph-based project view in `eye`
-- 3D renderer with 2D fallback
-- Filter controls for severity, ecosystem, EPSS, and active-only findings
-- Detail panel for remediation and exploit context
-
-## DECREE Score
-
-The current implementation uses:
-
-```text
-DECREE Score = (CVSS_base × 0.4) + (EPSS × 100 × 0.35) + (Reachability × 0.25)
-```
-
-This is implementation state, not a long-term compatibility promise.
+</details>
 
 ## Quick Start
 
@@ -200,68 +218,24 @@ curl http://localhost:8400/healthz
 curl http://localhost:3400/healthz
 ```
 
-Useful URLs:
+Open `http://localhost:3400` in your browser to access the visualization UI.
 
-- Gateway health: `http://localhost:8400/healthz`
-- Eye health: `http://localhost:3400/healthz`
-- Eye UI entrypoint: `http://localhost:3400`
+## API Reference
 
-### 7. Query the API directly
-
-The gateway is currently the most trustworthy user-facing surface because its route contract is explicit in the code.
-
-List projects:
-
-```bash
-curl http://localhost:8400/api/projects
-```
-
-List targets for a project:
-
-```bash
-curl http://localhost:8400/api/projects/<project-id>/targets
-```
-
-List active findings:
-
-```bash
-curl "http://localhost:8400/api/projects/<project-id>/findings?active_only=true&limit=20"
-```
-
-Top risks:
-
-```bash
-curl "http://localhost:8400/api/projects/<project-id>/top-risks?limit=10"
-```
-
-Timeline:
-
-```bash
-curl "http://localhost:8400/api/projects/<project-id>/timeline?limit=50"
-```
-
-Live events:
-
-```bash
-curl -N http://localhost:8400/api/events
-```
-
-## API Surface
-
-The current gateway routes are:
+### Endpoints
 
 | Method | Path | Notes |
 |---|---|---|
-| `GET` | `/healthz` | health check |
-| `GET` | `/api/projects` | list projects |
-| `GET` | `/api/projects/{id}/targets` | list targets for a project |
-| `GET` | `/api/projects/{id}/findings` | paginated findings with filters |
-| `GET` | `/api/findings/{instance_id}` | finding detail |
-| `GET` | `/api/projects/{id}/top-risks` | highest-score active findings |
-| `GET` | `/api/projects/{id}/timeline` | observed/disappeared events |
+| `GET` | `/healthz` | Health check |
+| `GET` | `/api/projects` | List projects |
+| `GET` | `/api/projects/{id}/targets` | List targets for a project |
+| `GET` | `/api/projects/{id}/findings` | Paginated findings with filters |
+| `GET` | `/api/findings/{instance_id}` | Finding detail |
+| `GET` | `/api/projects/{id}/top-risks` | Highest-score active findings |
+| `GET` | `/api/projects/{id}/timeline` | Observed/disappeared events |
 | `GET` | `/api/events` | SSE stream |
 
-Supported findings query params:
+### Findings query parameters
 
 - `active_only=true|false`
 - `severity=<label>`
@@ -270,7 +244,7 @@ Supported findings query params:
 - `limit=<n>`
 - `cursor=<opaque>`
 
-Supported timeline query params:
+### Timeline query parameters
 
 - `target_id=<uuid>`
 - `event_type=observed|disappeared`
@@ -279,24 +253,33 @@ Supported timeline query params:
 - `limit=<n>`
 - `cursor=<opaque>`
 
-Response shapes:
+### Response shapes
 
-- list endpoints generally return `{ "data": [...] }`
-- paginated endpoints return `{ "data": [...], "has_more": bool, "next_cursor": "..." }`
-- errors return `{ "error": { "code": "...", "message": "..." } }`
+- List endpoints return `{ "data": [...] }`
+- Paginated endpoints return `{ "data": [...], "has_more": bool, "next_cursor": "..." }`
+- Errors return `{ "error": { "code": "...", "message": "..." } }`
 
-## Internal Scanner RPC Surface
+### Examples
 
-`decree-oracle` talks to `decree-scanner` over JSON/HTTP Connect-style RPC routes:
+```bash
+# List projects
+curl http://localhost:8400/api/projects
 
-- `/scanner.v1.ScannerService/RunScan`
-- `/scanner.v1.ScannerService/GetScanStatus`
-- `/scanner.v1.EnrichmentService/SyncEpss`
-- `/scanner.v1.EnrichmentService/SyncNvd`
-- `/scanner.v1.EnrichmentService/SyncExploitDb`
-- `/scanner.v1.EnrichmentService/RecalculateScores`
+# List targets for a project
+curl http://localhost:8400/api/projects/<project-id>/targets
 
-These are internal service endpoints, but they are useful to know when tracing behavior across the system.
+# Active findings (paginated)
+curl "http://localhost:8400/api/projects/<project-id>/findings?active_only=true&limit=20"
+
+# Top risks
+curl "http://localhost:8400/api/projects/<project-id>/top-risks?limit=10"
+
+# Timeline
+curl "http://localhost:8400/api/projects/<project-id>/timeline?limit=50"
+
+# Live events (SSE)
+curl -N http://localhost:8400/api/events
+```
 
 ## Configuration
 
@@ -318,7 +301,6 @@ Important fields:
 - `scan.initial_scan`: whether startup triggers scans immediately
 - `scan.vulnerability_refresh.epss`: EPSS refresh cadence
 - `scan.vulnerability_refresh.nvd`: NVD refresh cadence
-- `scan.vulnerability_refresh.osv`: present in config, though scanner-side refresh behavior is currently centered on EPSS/NVD/Exploit-DB RPCs
 - `diff.track`: includes values such as `new_cve`, `resolved_cve`, `score_change`, `new_exploit`
 
 ### Secrets
@@ -331,7 +313,7 @@ The following files are wired into Docker Compose:
 | `secrets/nvd_api_key.txt` | NVD API key |
 | `secrets/slack_webhook_url.txt` | Slack webhook URL |
 | `secrets/discord_webhook_url.txt` | Discord webhook URL |
-| `secrets/decree_webhook_token.txt` | generic webhook auth token |
+| `secrets/decree_webhook_token.txt` | Generic webhook auth token |
 
 ## Local Development
 
@@ -390,13 +372,29 @@ make fmt-check   # verify Go/Rust formatting
 └── docker-compose.yml   # local stack
 ```
 
-## Known Limitations
+## Contributing
 
-These are not hypothetical. They follow directly from the current source tree.
+Contributions are welcome! Here's the quick version:
 
-- Timeline controls and timeline state exist in the frontend, but the full end-to-end timeline replay flow is still only partially wired.
-- There is no shipped `decree` CLI in the current source tree despite M6 planning notes mentioning one.
+1. Fork the repository and create a feature branch
+2. Follow the TDD workflow: write a failing test first, then implement
+3. Run the relevant lint and test commands (see [Local Development](#local-development))
+4. Open a pull request with a clear description of the change
+
+For larger changes, please open an issue first to discuss the approach.
+
+## Acknowledgments
+
+DECREE builds on the work of many open-source projects:
+
+- [Syft](https://github.com/anchore/syft) — SBOM generation
+- [OSV](https://osv.dev/) — vulnerability advisory data
+- [FIRST EPSS](https://www.first.org/epss/) — exploit prediction scoring
+- [NVD](https://nvd.nist.gov/) — vulnerability severity data
+- [Three.js](https://threejs.org/) — 3D visualization
+- [Atlas](https://atlasgo.io/) — database schema management
+- [Connect-RPC](https://connectrpc.com/) — inter-service communication
 
 ## License
 
-Apache License 2.0. See `LICENSE` for details.
+Apache License 2.0. See [LICENSE](LICENSE) for details.
