@@ -11,18 +11,22 @@ interface Props {
 }
 
 const { finding, onClose }: Props = $props();
+
+function formatPurl(purl: string): string {
+	return decodeURIComponent(purl.replace(/^pkg:[^/]+\//, '').replace(/\?.*$/, ''));
+}
 </script>
 
 {#if finding}
-	<div class="fixed inset-y-0 right-0 z-40 w-96 overflow-y-auto border-l border-hud-border bg-hud-void" style="box-shadow: inset 1px 0 8px rgba(0, 229, 255, 0.1);">
-		<div class="flex items-center justify-between border-b border-hud-border px-4 py-3">
+	<div class="fixed inset-y-0 right-0 z-40 w-96 flex flex-col border-l border-hud-border bg-hud-void" style="box-shadow: inset 1px 0 8px rgba(0, 229, 255, 0.1);">
+		<div class="flex-shrink-0 flex items-center justify-between border-b border-hud-border px-4 py-3">
 			<h2 class="hud-header text-sm">{finding.advisory_id}</h2>
 			<button onclick={onClose} class="p-1 text-hud-text-muted hover:text-hud-accent transition-colors">
 				<X size={16} />
 			</button>
 		</div>
 
-		<div class="space-y-4 p-4">
+		<div class="flex-shrink-0 space-y-4 p-4 border-b border-hud-border">
 			<div class="flex items-center gap-2">
 				<SeverityBadge severity={parseSeverity(finding.severity)} />
 				{#if finding.is_active}
@@ -56,7 +60,9 @@ const { finding, onClose }: Props = $props();
 					</div>
 				</div>
 			{/if}
+		</div>
 
+		<div class="flex-1 min-h-0 overflow-y-auto space-y-4 p-4">
 			{#if finding.exploits.length > 0}
 				<div>
 					<h3 class="hud-header">Known Exploits</h3>
@@ -83,12 +89,12 @@ const { finding, onClose }: Props = $props();
 					<h3 class="hud-header">Dependency Path</h3>
 					<div class="mt-1 space-y-0.5 font-mono text-xs text-hud-text-secondary">
 						{#each finding.dependency_path as edge, i}
-							<div class="flex items-center gap-1">
+							<div class="flex flex-wrap items-center gap-1">
 								{#if i === 0}
-									<span>{edge.from_pkg}</span>
+									<span>{formatPurl(edge.from_pkg)}</span>
 								{/if}
 								<span class="text-hud-accent-dim">→</span>
-								<span>{edge.to_pkg}</span>
+								<span>{formatPurl(edge.to_pkg)}</span>
 								<span class="text-hud-text-muted">({edge.dep_type})</span>
 							</div>
 						{/each}
