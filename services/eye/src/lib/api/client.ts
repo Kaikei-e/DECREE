@@ -26,7 +26,9 @@ export interface TimelineFilterParams {
 	limit?: number;
 }
 
-const BASE_URL = import.meta.env.VITE_GATEWAY_URL ?? import.meta.env.VITE_API_URL ?? 'http://localhost:8400';
+import { env } from '$env/dynamic/public';
+
+const BASE_URL = env.PUBLIC_GATEWAY_URL ?? 'http://localhost:8400';
 
 interface DataEnvelope<T> {
 	data: T;

@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ApiError, PagedResponse } from '$lib/types/api';
+
+vi.mock('$env/dynamic/public', () => ({
+	env: { PUBLIC_GATEWAY_URL: 'http://localhost:8400' },
+}));
+
 import { ApiClient } from './client';
 
 const BASE = 'http://localhost:8400';
