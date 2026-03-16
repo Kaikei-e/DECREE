@@ -12,7 +12,9 @@ import {
 export const CLUSTER_SPACING = 8;
 export const Y_SCALE = 5;
 export const Z_SCALE = 3;
-export const JITTER_RANGE = 2;
+export const JITTER_RANGE = 0.35;
+const CLUSTER_GRID_X_SPACING = 0.9;
+const CLUSTER_GRID_Z_SPACING = 0.9;
 
 const VALID_SEVERITIES = new Set<Severity>(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']);
 
@@ -97,6 +99,32 @@ export function computeLayout(findings: Finding[], targets: Target[]): GraphMode
 
 	// Track positions to avoid exact overlaps
 	const usedPositions = new Set<string>();
+	const findingsByCluster = new Map<string, Finding[]>();
+	for (const finding of findings) {
+		let clusterFindings = findingsByCluster.get(finding.target_id);
+		if (!clusterFindings) {
+			clusterFindings = [];
+			findingsByCluster.set(finding.target_id, clusterFindings);
+		}
+		clusterFindings.push(finding);
+	}
+
+	const layoutIndexByInstance = new Map<string, { col: number; row: number }>();
+	for (const [, clusterFindings] of findingsByCluster) {
+		clusterFindings.sort((a, b) => {
+			const scoreDiff = (b.decree_score ?? 0) - (a.decree_score ?? 0);
+			if (scoreDiff !== 0) return scoreDiff;
+			return a.instance_id.localeCompare(b.instance_id);
+		});
+
+		const columnCount = Math.max(2, Math.ceil(Math.sqrt(clusterFindings.length)));
+		for (const [index, finding] of clusterFindings.entries()) {
+			layoutIndexByInstance.set(finding.instance_id, {
+				col: index % columnCount,
+				row: Math.floor(index / columnCount),
+			});
+		}
+	}
 
 	for (const finding of findings) {
 		const cluster = clusterMap.get(finding.target_id);
@@ -106,11 +134,22 @@ export function computeLayout(findings: Finding[], targets: Target[]): GraphMode
 		const decreeScore = finding.decree_score ?? 0;
 		const depDepth = 0; // dep_depth only available in FindingDetail
 
+		const clusterFindings = findingsByCluster.get(finding.target_id) ?? [finding];
+		const columnCount = Math.max(2, Math.ceil(Math.sqrt(clusterFindings.length)));
+		const rowCount = Math.max(1, Math.ceil(clusterFindings.length / columnCount));
+		const layoutIndex = layoutIndexByInstance.get(finding.instance_id) ?? { col: 0, row: 0 };
+
 		let jitterX = seededJitter(finding.instance_id, JITTER_RANGE);
-		let jitterZ = seededJitter(`${finding.instance_id}-z`, JITTER_RANGE * 0.5);
-		let x = cluster.centerX + jitterX;
+		let jitterZ = seededJitter(`${finding.instance_id}-z`, JITTER_RANGE);
+		let x =
+			cluster.centerX +
+			(layoutIndex.col - (columnCount - 1) / 2) * CLUSTER_GRID_X_SPACING +
+			jitterX;
 		const y = decreeScore * Y_SCALE;
-		let z = depDepth * Z_SCALE + jitterZ;
+		let z =
+			(layoutIndex.row - (rowCount - 1) / 2) * CLUSTER_GRID_Z_SPACING +
+			depDepth * Z_SCALE +
+			jitterZ;
 
 		// Avoid exact overlaps by nudging
 		let posKey = `${x.toFixed(4)},${y.toFixed(4)},${z.toFixed(4)}`;

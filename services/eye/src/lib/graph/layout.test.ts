@@ -173,6 +173,27 @@ describe('computeLayout', () => {
 			positions.add(key);
 		}
 	});
+
+	it('spreads nodes within a cluster across both x and z axes for skyline readability', () => {
+		const findings = Array.from({ length: 12 }, (_, i) =>
+			makeFinding({
+				instance_id: `grid-${i}`,
+				decree_score: 4.0 + i * 0.05,
+			}),
+		);
+		const targets = [makeTarget()];
+		const graph = computeLayout(findings, targets);
+
+		const xValues = new Set<number>();
+		const zValues = new Set<number>();
+		for (const [, node] of graph.nodes) {
+			xValues.add(Number(node.position.x.toFixed(2)));
+			zValues.add(Number(node.position.z.toFixed(2)));
+		}
+
+		expect(xValues.size).toBeGreaterThan(2);
+		expect(zValues.size).toBeGreaterThan(2);
+	});
 });
 
 describe('parseSeverity', () => {

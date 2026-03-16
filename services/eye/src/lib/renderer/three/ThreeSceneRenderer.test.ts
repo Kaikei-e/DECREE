@@ -270,4 +270,17 @@ describe('ThreeSceneRenderer', () => {
 
 		renderer.dispose();
 	});
+
+	it('positions the initial camera in an elevated overview instead of inside the columns', async () => {
+		renderer.mount(container);
+		renderer.setGraphModel(sampleGraph);
+
+		const { animateCamera } = await import('./camera-presets');
+		const calls = (animateCamera as ReturnType<typeof vi.fn>).mock.calls;
+		const lastTarget = calls.at(-1)?.[2];
+		expect(lastTarget?.position.y).toBeGreaterThan(8);
+		expect(lastTarget?.position.z).toBeGreaterThan(10);
+
+		renderer.dispose();
+	});
 });

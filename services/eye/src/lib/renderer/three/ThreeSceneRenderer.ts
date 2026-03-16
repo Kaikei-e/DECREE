@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import type { GraphModel } from '$lib/graph/model';
+import type { GraphModel, GraphNode } from '$lib/graph/model';
 import type { SceneRenderer } from '../types';
 import {
 	animateCamera,
@@ -20,6 +20,7 @@ const DISTRICT_PADDING_X = 1.8;
 const DISTRICT_PADDING_Z = 1.6;
 const DISTRICT_FLOOR_Y = -0.04;
 const DISTRICT_PLATE_HEIGHT = 0.05;
+const CAMERA_VERTICAL_PADDING = 9;
 
 export class ThreeSceneRenderer implements SceneRenderer {
 	private renderer!: THREE.WebGLRenderer;
@@ -117,6 +118,7 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	setGraphModel(model: GraphModel) {
 		this.graph = model;
 		this.rebuildScene(model);
+		this.resetView();
 	}
 
 	focusCluster(clusterId: string) {
@@ -146,19 +148,15 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	resetView() {
 		const bounds = this.getSceneBounds();
 		if (bounds) {
-			const { cx, cy, spanX, spanY } = bounds;
-			const margin = 1.3;
-			const vFov = THREE.MathUtils.degToRad(this.camera.fov / 2);
-			const aspect = this.camera.aspect;
-			const distY = (spanY * margin) / (2 * Math.tan(vFov));
-			const distX = (spanX * margin) / (2 * Math.tan(vFov) * aspect);
-			const dist = Math.max(distY, distX, 15);
-			const elevate = spanY * 0.1;
+			const { cx, cz, maxHeight, spanX, spanZ } = bounds;
+			const horizontalSpan = Math.max(spanX, spanZ);
+			const dist = Math.max(horizontalSpan * 1.45, maxHeight * 1.35, 18);
+			const elevate = Math.max(CAMERA_VERTICAL_PADDING, maxHeight * 0.7);
 
 			this.cancelCameraAnimation?.();
 			this.cancelCameraAnimation = animateCamera(this.camera, this.controls, {
-				position: new THREE.Vector3(cx, cy + elevate, dist),
-				lookAt: new THREE.Vector3(cx, cy, 0),
+				position: new THREE.Vector3(cx + horizontalSpan * 0.32, elevate, cz + dist),
+				lookAt: new THREE.Vector3(cx, maxHeight * 0.35, cz),
 			});
 		} else {
 			const clusterCount = this.graph?.clusters.length ?? 1;
@@ -196,31 +194,40 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	setViewPreset(preset: 'top' | 'front'): void {
 		const bounds = this.getSceneBounds();
 		const cx = bounds?.cx ?? 0;
-		const cy = bounds?.cy ?? 0;
-		const span = bounds ? Math.max(bounds.spanX, bounds.spanY) : 20;
+		const cy = bounds ? bounds.maxHeight * 0.35 : 0;
+		const span = bounds ? Math.max(bounds.spanX, bounds.spanZ) : 20;
 		const target = preset === 'top' ? topDownPreset(cx, cy, span) : frontPreset(cx, cy, span);
 		this.cancelCameraAnimation?.();
 		this.cancelCameraAnimation = animateCamera(this.camera, this.controls, target);
 	}
 
-	private getSceneBounds(): { cx: number; cy: number; spanX: number; spanY: number } | null {
+	private getSceneBounds(): {
+		cx: number;
+		cz: number;
+		maxHeight: number;
+		spanX: number;
+		spanZ: number;
+	} | null {
 		if (!this.graph || this.graph.nodes.size === 0) return null;
 		const nodes = Array.from(this.graph.nodes.values());
 		let minX = Infinity,
 			maxX = -Infinity;
-		let minY = Infinity,
-			maxY = -Infinity;
+		let minZ = Infinity,
+			maxZ = -Infinity;
+		let maxHeight = 0;
 		for (const n of nodes) {
 			minX = Math.min(minX, n.position.x);
 			maxX = Math.max(maxX, n.position.x);
-			minY = Math.min(minY, n.position.y);
-			maxY = Math.max(maxY, n.position.y);
+			minZ = Math.min(minZ, n.position.z);
+			maxZ = Math.max(maxZ, n.position.z);
+			maxHeight = Math.max(maxHeight, this.getColumnHeight(n));
 		}
 		return {
 			cx: (minX + maxX) / 2,
-			cy: (minY + maxY) / 2,
+			cz: (minZ + maxZ) / 2,
+			maxHeight,
 			spanX: maxX - minX || 10,
-			spanY: maxY - minY || 10,
+			spanZ: maxZ - minZ || 10,
 		};
 	}
 
@@ -317,7 +324,7 @@ export class ThreeSceneRenderer implements SceneRenderer {
 			if (!node) continue;
 			this.nodeIds.push(node.id);
 			const width = Math.min(MAX_COLUMN_WIDTH, 0.18 + node.visual.size * 0.12);
-			const height = Math.max(MIN_COLUMN_HEIGHT, node.position.y);
+			const height = this.getColumnHeight(node);
 			matrix.makeScale(width, height, width);
 			matrix.setPosition(node.position.x, height / 2, node.position.z);
 			mesh.setMatrixAt(i, matrix);
@@ -355,6 +362,10 @@ export class ThreeSceneRenderer implements SceneRenderer {
 			this.edgeLines = new THREE.LineSegments(geometry, edgeMat);
 			this.scene.add(this.edgeLines);
 		}
+	}
+
+	private getColumnHeight(node: GraphNode): number {
+		return Math.max(MIN_COLUMN_HEIGHT, 1 + node.decreeScore * 1.1);
 	}
 
 	private createDistrictGroup(model: GraphModel): THREE.Group {
