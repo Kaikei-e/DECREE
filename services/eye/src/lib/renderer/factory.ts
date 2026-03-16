@@ -11,7 +11,7 @@ export async function createRenderer(choice?: RendererChoice): Promise<SceneRend
 	}
 
 	const cap = await detectCapability();
-	if (cap === 'webgpu' || cap === 'webgl2') {
+	if (cap === 'webgl2') {
 		return new ThreeSceneRenderer();
 	}
 

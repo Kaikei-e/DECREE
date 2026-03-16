@@ -39,6 +39,10 @@ export class Canvas2DRenderer implements SceneRenderer {
 
 	dispose() {
 		cancelAnimationFrame(this.animationId);
+		// Remove event listeners
+		this.canvas?.removeEventListener('pointermove', this.handlePointerMove);
+		this.canvas?.removeEventListener('click', this.handleClick);
+		// DOM cleanup
 		if (this.canvas && this.container) {
 			this.container.removeChild(this.canvas);
 		}
@@ -70,6 +74,35 @@ export class Canvas2DRenderer implements SceneRenderer {
 	}
 
 	resetView() {
+		this.fitView();
+		this.draw();
+	}
+
+	zoomIn(): void {
+		if (!this.canvas) return;
+		const dpr = window.devicePixelRatio || 1;
+		const cx = this.canvas.width / dpr / 2;
+		const cy = this.canvas.height / dpr / 2;
+		const factor = 1.25;
+		this.offsetX = cx - (cx - this.offsetX) * factor;
+		this.offsetY = cy - (cy - this.offsetY) * factor;
+		this.scale *= factor;
+		this.draw();
+	}
+
+	zoomOut(): void {
+		if (!this.canvas) return;
+		const dpr = window.devicePixelRatio || 1;
+		const cx = this.canvas.width / dpr / 2;
+		const cy = this.canvas.height / dpr / 2;
+		const factor = 0.8;
+		this.offsetX = cx - (cx - this.offsetX) * factor;
+		this.offsetY = cy - (cy - this.offsetY) * factor;
+		this.scale *= factor;
+		this.draw();
+	}
+
+	setViewPreset(_preset: 'top' | 'front'): void {
 		this.fitView();
 		this.draw();
 	}
@@ -217,30 +250,35 @@ export class Canvas2DRenderer implements SceneRenderer {
 		return null;
 	}
 
-	private setupEvents() {
+	private handlePointerMove = (e: PointerEvent) => {
 		const canvas = this.canvas;
 		if (!canvas) return;
+		const rect = canvas.getBoundingClientRect();
+		const sx = e.clientX - rect.left;
+		const sy = e.clientY - rect.top;
+		const nodeId = this.hitTest(sx, sy);
+		if (nodeId !== this.hoveredNodeId) {
+			this.hoveredNodeId = nodeId;
+			this.hoverCallback?.(nodeId, nodeId ? { x: e.clientX, y: e.clientY } : undefined);
+			this.draw();
+		}
+	};
 
-		canvas.addEventListener('pointermove', (e) => {
-			const rect = canvas.getBoundingClientRect();
-			const sx = e.clientX - rect.left;
-			const sy = e.clientY - rect.top;
-			const nodeId = this.hitTest(sx, sy);
-			if (nodeId !== this.hoveredNodeId) {
-				this.hoveredNodeId = nodeId;
-				this.hoverCallback?.(nodeId, nodeId ? { x: e.clientX, y: e.clientY } : undefined);
-				this.draw();
-			}
-		});
+	private handleClick = (e: MouseEvent) => {
+		const canvas = this.canvas;
+		if (!canvas) return;
+		const rect = canvas.getBoundingClientRect();
+		const sx = e.clientX - rect.left;
+		const sy = e.clientY - rect.top;
+		const nodeId = this.hitTest(sx, sy);
+		if (nodeId) {
+			this.clickCallback?.(nodeId);
+		}
+	};
 
-		canvas.addEventListener('click', (e) => {
-			const rect = canvas.getBoundingClientRect();
-			const sx = e.clientX - rect.left;
-			const sy = e.clientY - rect.top;
-			const nodeId = this.hitTest(sx, sy);
-			if (nodeId) {
-				this.clickCallback?.(nodeId);
-			}
-		});
+	private setupEvents() {
+		if (!this.canvas) return;
+		this.canvas.addEventListener('pointermove', this.handlePointerMove);
+		this.canvas.addEventListener('click', this.handleClick);
 	}
 }

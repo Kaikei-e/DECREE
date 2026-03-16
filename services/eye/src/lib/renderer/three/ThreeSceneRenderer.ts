@@ -2,12 +2,18 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import type { GraphModel } from '$lib/graph/model';
 import type { SceneRenderer } from '../types';
-import { animateCamera, clusterPreset, nodePreset, overviewPreset } from './camera-presets';
+import {
+	animateCamera,
+	clusterPreset,
+	frontPreset,
+	nodePreset,
+	overviewPreset,
+	topDownPreset,
+} from './camera-presets';
 import { createEdgeMaterial, createNodeMaterial } from './node-material';
 import { NodeRaycaster } from './raycaster';
 
 const NODE_GEOMETRY = new THREE.SphereGeometry(0.3, 16, 12);
-const PULSE_SPEED = 2;
 
 export class ThreeSceneRenderer implements SceneRenderer {
 	private renderer!: THREE.WebGLRenderer;
@@ -28,7 +34,8 @@ export class ThreeSceneRenderer implements SceneRenderer {
 		| ((nodeId: string | null, position?: { x: number; y: number }) => void)
 		| null = null;
 	private hoveredNodeId: string | null = null;
-	private clock = new THREE.Clock();
+	private timer = new THREE.Timer();
+	private cancelCameraAnimation: (() => void) | null = null;
 
 	mount(container: HTMLElement) {
 		this.container = container;
@@ -36,6 +43,7 @@ export class ThreeSceneRenderer implements SceneRenderer {
 		this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 		this.renderer.setSize(container.clientWidth, container.clientHeight);
 		this.renderer.setClearColor(0x050a0e, 1);
+		this.renderer.domElement.style.display = 'block';
 		container.appendChild(this.renderer.domElement);
 
 		this.camera.aspect = container.clientWidth / container.clientHeight;
@@ -43,10 +51,14 @@ export class ThreeSceneRenderer implements SceneRenderer {
 
 		this.controls = new OrbitControls(this.camera, this.renderer.domElement);
 		this.controls.enableDamping = true;
-		this.controls.dampingFactor = 0.05;
+		this.controls.dampingFactor = 0.15;
+		this.controls.rotateSpeed = 0.5;
+		this.controls.minDistance = 3;
+		this.controls.maxDistance = 200;
 
 		this.raycaster = new NodeRaycaster(this.camera);
 
+		this.timer.connect(document);
 		this.setupLights();
 		this.setupEvents(container);
 		this.resetView();
@@ -54,13 +66,44 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	}
 
 	dispose() {
+		// 1. Animation loop
 		cancelAnimationFrame(this.animationId);
+		this.cancelCameraAnimation?.();
+
+		// 2. Timer cleanup
+		this.timer.disconnect();
+		this.timer.dispose();
+
+		// 3. Event listeners
+		this.container?.removeEventListener('pointermove', this.handlePointerMove);
+		this.container?.removeEventListener('click', this.handleClick);
+
+		// 4. Three.js resources
 		this.controls?.dispose();
+
+		if (this.instancedMesh) {
+			this.instancedMesh.geometry.dispose();
+			if (this.instancedMesh.material instanceof THREE.Material) {
+				this.instancedMesh.material.dispose();
+			}
+		}
+		if (this.edgeLines) {
+			this.edgeLines.geometry.dispose();
+			if (this.edgeLines.material instanceof THREE.Material) {
+				this.edgeLines.material.dispose();
+			}
+		}
+
+		this.scene.clear();
+
+		// 5. WebGL context release (forceContextLoss before dispose)
+		this.renderer?.forceContextLoss();
 		this.renderer?.dispose();
+
+		// 6. DOM cleanup
 		if (this.container && this.renderer?.domElement.parentNode === this.container) {
 			this.container.removeChild(this.renderer.domElement);
 		}
-		this.scene.clear();
 	}
 
 	setGraphModel(model: GraphModel) {
@@ -71,14 +114,20 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	focusCluster(clusterId: string) {
 		const cluster = this.graph?.clusters.find((c) => c.id === clusterId);
 		if (cluster) {
-			animateCamera(this.camera, this.controls, clusterPreset(cluster.centerX));
+			this.cancelCameraAnimation?.();
+			this.cancelCameraAnimation = animateCamera(
+				this.camera,
+				this.controls,
+				clusterPreset(cluster.centerX),
+			);
 		}
 	}
 
 	focusNode(nodeId: string) {
 		const node = this.graph?.nodes.get(nodeId);
 		if (node) {
-			animateCamera(
+			this.cancelCameraAnimation?.();
+			this.cancelCameraAnimation = animateCamera(
 				this.camera,
 				this.controls,
 				nodePreset(node.position.x, node.position.y, node.position.z),
@@ -87,8 +136,84 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	}
 
 	resetView() {
-		const clusterCount = this.graph?.clusters.length ?? 1;
-		animateCamera(this.camera, this.controls, overviewPreset(clusterCount));
+		const bounds = this.getSceneBounds();
+		if (bounds) {
+			const { cx, cy, spanX, spanY } = bounds;
+			const margin = 1.3;
+			const vFov = THREE.MathUtils.degToRad(this.camera.fov / 2);
+			const aspect = this.camera.aspect;
+			const distY = (spanY * margin) / (2 * Math.tan(vFov));
+			const distX = (spanX * margin) / (2 * Math.tan(vFov) * aspect);
+			const dist = Math.max(distY, distX, 15);
+			const elevate = spanY * 0.1;
+
+			this.cancelCameraAnimation?.();
+			this.cancelCameraAnimation = animateCamera(this.camera, this.controls, {
+				position: new THREE.Vector3(cx, cy + elevate, dist),
+				lookAt: new THREE.Vector3(cx, cy, 0),
+			});
+		} else {
+			const clusterCount = this.graph?.clusters.length ?? 1;
+			this.cancelCameraAnimation?.();
+			this.cancelCameraAnimation = animateCamera(
+				this.camera,
+				this.controls,
+				overviewPreset(clusterCount),
+			);
+		}
+	}
+
+	zoomIn(): void {
+		const dir = new THREE.Vector3().subVectors(this.controls.target, this.camera.position);
+		const newPos = this.camera.position.clone().addScaledVector(dir, 0.2);
+		if (newPos.distanceTo(this.controls.target) < this.controls.minDistance) return;
+		this.cancelCameraAnimation?.();
+		this.cancelCameraAnimation = animateCamera(this.camera, this.controls, {
+			position: newPos,
+			lookAt: this.controls.target.clone(),
+		});
+	}
+
+	zoomOut(): void {
+		const dir = new THREE.Vector3().subVectors(this.controls.target, this.camera.position);
+		const newPos = this.camera.position.clone().addScaledVector(dir, -0.2);
+		if (newPos.distanceTo(this.controls.target) > this.controls.maxDistance) return;
+		this.cancelCameraAnimation?.();
+		this.cancelCameraAnimation = animateCamera(this.camera, this.controls, {
+			position: newPos,
+			lookAt: this.controls.target.clone(),
+		});
+	}
+
+	setViewPreset(preset: 'top' | 'front'): void {
+		const bounds = this.getSceneBounds();
+		const cx = bounds?.cx ?? 0;
+		const cy = bounds?.cy ?? 0;
+		const span = bounds ? Math.max(bounds.spanX, bounds.spanY) : 20;
+		const target = preset === 'top' ? topDownPreset(cx, cy, span) : frontPreset(cx, cy, span);
+		this.cancelCameraAnimation?.();
+		this.cancelCameraAnimation = animateCamera(this.camera, this.controls, target);
+	}
+
+	private getSceneBounds(): { cx: number; cy: number; spanX: number; spanY: number } | null {
+		if (!this.graph || this.graph.nodes.size === 0) return null;
+		const nodes = Array.from(this.graph.nodes.values());
+		let minX = Infinity,
+			maxX = -Infinity;
+		let minY = Infinity,
+			maxY = -Infinity;
+		for (const n of nodes) {
+			minX = Math.min(minX, n.position.x);
+			maxX = Math.max(maxX, n.position.x);
+			minY = Math.min(minY, n.position.y);
+			maxY = Math.max(maxY, n.position.y);
+		}
+		return {
+			cx: (minX + maxX) / 2,
+			cy: (minY + maxY) / 2,
+			spanX: maxX - minX || 10,
+			spanY: maxY - minY || 10,
+		};
 	}
 
 	onNodeClick(callback: (nodeId: string) => void) {
@@ -120,30 +245,38 @@ export class ThreeSceneRenderer implements SceneRenderer {
 		this.scene.add(grid);
 	}
 
-	private setupEvents(container: HTMLElement) {
-		container.addEventListener('pointermove', (e) => {
-			this.raycaster.updatePointer(e, container);
-			const nodeId = this.raycaster.pick();
-			if (nodeId !== this.hoveredNodeId) {
-				this.hoveredNodeId = nodeId;
-				this.hoverCallback?.(nodeId, nodeId ? { x: e.clientX, y: e.clientY } : undefined);
-			}
-		});
+	private handlePointerMove = (e: PointerEvent) => {
+		this.raycaster.updatePointer(e, this.container!);
+		const nodeId = this.raycaster.pick();
+		if (nodeId !== this.hoveredNodeId) {
+			this.hoveredNodeId = nodeId;
+			// Disable camera rotation while hovering a node so click targets stay stable
+			this.controls.enableRotate = nodeId == null;
+			this.hoverCallback?.(nodeId, nodeId ? { x: e.clientX, y: e.clientY } : undefined);
+		}
+	};
 
-		container.addEventListener('click', (e) => {
-			this.raycaster.updatePointer(e as PointerEvent, container);
-			const nodeId = this.raycaster.pick();
-			if (nodeId) {
-				this.clickCallback?.(nodeId);
-			}
-		});
+	private handleClick = (e: MouseEvent) => {
+		this.raycaster.updatePointer(e as PointerEvent, this.container!);
+		const nodeId = this.raycaster.pick();
+		if (nodeId) {
+			this.clickCallback?.(nodeId);
+		}
+	};
+
+	private setupEvents(container: HTMLElement) {
+		container.addEventListener('pointermove', this.handlePointerMove);
+		container.addEventListener('click', this.handleClick);
 	}
 
 	private rebuildScene(model: GraphModel) {
 		// Remove old meshes
 		if (this.instancedMesh) {
 			this.scene.remove(this.instancedMesh);
-			this.instancedMesh.dispose();
+			this.instancedMesh.geometry.dispose();
+			if (this.instancedMesh.material instanceof THREE.Material) {
+				this.instancedMesh.material.dispose();
+			}
 		}
 		if (this.edgeLines) {
 			this.scene.remove(this.edgeLines);
@@ -206,28 +339,12 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	}
 
 	private animate() {
-		this.animationId = requestAnimationFrame(() => this.animate());
-		this.clock.getDelta();
+		this.animationId = requestAnimationFrame((timestamp) => {
+			this.timer.update(timestamp);
 
-		// Pulse animation for recently observed nodes
-		if (this.instancedMesh && this.graph) {
-			const time = this.clock.getElapsedTime();
-			const nodes = Array.from(this.graph.nodes.values());
-			const matrix = new THREE.Matrix4();
-			for (let i = 0; i < nodes.length; i++) {
-				const node = nodes[i];
-				if (!node) continue;
-				if (node.visual.pulse) {
-					const scale = node.visual.size * (1 + 0.15 * Math.sin(time * PULSE_SPEED));
-					matrix.makeScale(scale, scale, scale);
-					matrix.setPosition(node.position.x, node.position.y, node.position.z);
-					this.instancedMesh.setMatrixAt(i, matrix);
-				}
-			}
-			this.instancedMesh.instanceMatrix.needsUpdate = true;
-		}
-
-		this.controls.update();
-		this.renderer.render(this.scene, this.camera);
+			this.controls.update();
+			this.renderer.render(this.scene, this.camera);
+			this.animate();
+		});
 	}
 }

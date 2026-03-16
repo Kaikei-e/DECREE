@@ -7,9 +7,12 @@ export interface SceneRenderer {
 	focusCluster(clusterId: string): void;
 	focusNode(nodeId: string): void;
 	resetView(): void;
+	zoomIn(): void;
+	zoomOut(): void;
+	setViewPreset(preset: 'top' | 'front'): void;
 	onNodeClick(callback: (nodeId: string) => void): void;
 	onNodeHover(callback: (nodeId: string | null, position?: { x: number; y: number }) => void): void;
 	resize(): void;
 }
 
-export type RendererCapability = 'webgpu' | 'webgl2' | 'canvas2d';
+export type RendererCapability = 'webgl2' | 'canvas2d';

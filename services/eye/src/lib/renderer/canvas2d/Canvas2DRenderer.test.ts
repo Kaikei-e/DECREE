@@ -89,4 +89,43 @@ describe('Canvas2DRenderer', () => {
 		expect(callback).not.toHaveBeenCalled();
 		renderer.dispose();
 	});
+
+	it('removes event listeners from canvas on dispose', () => {
+		renderer.mount(container);
+		const canvas = container.querySelector('canvas')!;
+		const removeSpy = vi.spyOn(canvas, 'removeEventListener');
+		renderer.dispose();
+
+		const removedTypes = removeSpy.mock.calls.map((c) => c[0]);
+		expect(removedTypes).toContain('pointermove');
+		expect(removedTypes).toContain('click');
+	});
+
+	it('zoomIn increases scale', () => {
+		renderer.mount(container);
+		renderer.setGraphModel(makeGraph());
+		const scaleBefore = (renderer as unknown as { scale: number }).scale;
+		renderer.zoomIn();
+		const scaleAfter = (renderer as unknown as { scale: number }).scale;
+		expect(scaleAfter).toBeGreaterThan(scaleBefore);
+		renderer.dispose();
+	});
+
+	it('zoomOut decreases scale', () => {
+		renderer.mount(container);
+		renderer.setGraphModel(makeGraph());
+		const scaleBefore = (renderer as unknown as { scale: number }).scale;
+		renderer.zoomOut();
+		const scaleAfter = (renderer as unknown as { scale: number }).scale;
+		expect(scaleAfter).toBeLessThan(scaleBefore);
+		renderer.dispose();
+	});
+
+	it('setViewPreset does not throw', () => {
+		renderer.mount(container);
+		renderer.setGraphModel(makeGraph());
+		expect(() => renderer.setViewPreset('top')).not.toThrow();
+		expect(() => renderer.setViewPreset('front')).not.toThrow();
+		renderer.dispose();
+	});
 });

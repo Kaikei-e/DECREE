@@ -9,10 +9,11 @@ interface AnimationTarget {
 }
 
 export function overviewPreset(clusterCount: number): AnimationTarget {
-	const span = Math.max(clusterCount * 8, 20);
+	const centerX = ((clusterCount - 1) * 8) / 2;
+	const dist = Math.max(clusterCount * 8, 20);
 	return {
-		position: new THREE.Vector3(span / 2, 30, span),
-		lookAt: new THREE.Vector3(span / 2, 15, 0),
+		position: new THREE.Vector3(centerX, 12, dist),
+		lookAt: new THREE.Vector3(centerX, 10, 0),
 	};
 }
 
@@ -20,6 +21,22 @@ export function clusterPreset(centerX: number): AnimationTarget {
 	return {
 		position: new THREE.Vector3(centerX, 20, 20),
 		lookAt: new THREE.Vector3(centerX, 15, 0),
+	};
+}
+
+export function topDownPreset(cx: number, cy: number, span: number): AnimationTarget {
+	const dist = Math.max(span * 1.2, 20);
+	return {
+		position: new THREE.Vector3(cx, cy + dist, 0),
+		lookAt: new THREE.Vector3(cx, cy, 0.001),
+	};
+}
+
+export function frontPreset(cx: number, cy: number, span: number): AnimationTarget {
+	const dist = Math.max(span * 1.2, 20);
+	return {
+		position: new THREE.Vector3(cx, cy, dist),
+		lookAt: new THREE.Vector3(cx, cy, 0),
 	};
 }
 
@@ -34,10 +51,11 @@ export function animateCamera(
 	camera: THREE.Camera,
 	controls: OrbitControls,
 	target: AnimationTarget,
-) {
+): () => void {
 	const startPos = camera.position.clone();
 	const startTarget = controls.target.clone();
 	const startTime = performance.now();
+	let frameId = 0;
 
 	function tick() {
 		const elapsed = performance.now() - startTime;
@@ -49,9 +67,10 @@ export function animateCamera(
 		controls.update();
 
 		if (t < 1) {
-			requestAnimationFrame(tick);
+			frameId = requestAnimationFrame(tick);
 		}
 	}
 
 	tick();
+	return () => cancelAnimationFrame(frameId);
 }
