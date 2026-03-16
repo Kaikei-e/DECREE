@@ -25,6 +25,7 @@ jobs:
         working-directory: services/scanner
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: dtolnay/rust-toolchain@1.94.0
         with:
           components: rustfmt, clippy

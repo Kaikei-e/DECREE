@@ -6,5 +6,5 @@ env "docker" {
     dir = "file://migrations"
   }
 
-  url = getenv("ATLAS_DB_URL", "postgresql://decree:decree@localhost:5434/decree?sslmode=disable")
+  url = getenv("ATLAS_DB_URL")
 }
