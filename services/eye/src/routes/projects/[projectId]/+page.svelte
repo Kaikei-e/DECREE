@@ -82,7 +82,7 @@ const maxDate = $derived(new Date().toISOString());
 							<p class="hud-header">Threat Skyline</p>
 							<p class="mt-1 text-xs leading-5 text-hud-text-secondary">
 								Drag to orbit, read the tallest districts first, and use the camera tools to compare
-								risk neighborhoods before drilling into a node.
+								risk neighborhoods before drilling into a column.
 							</p>
 						</div>
 

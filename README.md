@@ -11,7 +11,7 @@
 DECREE is a multi-service vulnerability analysis platform that goes beyond "is this package vulnerable?" to answer **"how much should we care right now?"** It combines SBOM-based scanning, multi-source enrichment, prioritized scoring, change detection, and 3D spatial visualization into a single deployable stack.
 
 <p align="center">
-  <img src="docs/assets/threat-skyline.webp" alt="DECREE Eye — Threat Skyline visualization" width="860">
+  <img src="docs/assets/threat-skyline.webp" alt="DECREE Eye — Threat Skyline 3D spatial view with Priority Queue" width="860">
 </p>
 
 ---

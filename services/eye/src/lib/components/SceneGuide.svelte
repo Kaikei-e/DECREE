@@ -111,7 +111,7 @@ const quickStats = $derived([
 					</div>
 					<div class="rounded-sm border border-hud-border/70 bg-hud-base/45 px-3 py-2">
 						<p class="font-mono text-[11px] uppercase tracking-[0.14em] text-hud-text">Glow = EPSS</p>
-						<p class="mt-1 text-xs text-hud-text-secondary">Brighter nodes are more likely to be exploited.</p>
+						<p class="mt-1 text-xs text-hud-text-secondary">Brighter columns are more likely to be exploited.</p>
 					</div>
 				</div>
 
