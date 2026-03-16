@@ -138,7 +138,7 @@ impl ScanPipeline {
                 );
 
                 let decree_score = score::decree_score(cvss, epss_score, reachability);
-                let severity = score::severity_label(decree_score);
+                let severity = score::severity_label(cvss);
 
                 // a. Upsert vulnerability_instance
                 let instance_id = sqlx::query_as::<_, (Uuid,)>(

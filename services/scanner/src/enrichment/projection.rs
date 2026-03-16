@@ -143,7 +143,7 @@ impl ProjectionUpdater {
 
             // Compute DECREE Score
             let new_score = score::decree_score(finding.cvss_score, epss_score, reachability);
-            let new_severity = score::severity_label(new_score);
+            let new_severity = score::severity_label(finding.cvss_score);
 
             // Update projection
             sqlx::query(

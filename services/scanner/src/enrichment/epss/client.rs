@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use sqlx::PgPool;
 use tracing::info;
 
@@ -6,6 +8,7 @@ use super::types::{EpssApiResponse, EpssEntry};
 
 const EPSS_API_URL: &str = "https://api.first.org/data/v1/epss";
 const CHUNK_SIZE: usize = 100;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct EpssClient {
     http: reqwest::Client,
@@ -22,6 +25,7 @@ impl EpssClient {
         Self {
             http: reqwest::Client::builder()
                 .user_agent("decree-scanner/0.1")
+                .timeout(REQUEST_TIMEOUT)
                 .build()
                 .expect("failed to build HTTP client"),
         }
