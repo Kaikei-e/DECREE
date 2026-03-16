@@ -1,6 +1,6 @@
 import type { GraphModel } from '$lib/graph/model';
 import { createEmptyGraph } from '$lib/graph/model';
-import type { Finding, FindingDetail, Project, Target } from '$lib/types/api';
+import type { Finding, FindingDetail, Target } from '$lib/types/api';
 
 export type RendererType = '3d' | '2d';
 
@@ -12,7 +12,6 @@ export interface FindingFilters {
 }
 
 function createAppState() {
-	let projects = $state<Project[]>([]);
 	let selectedProjectId = $state<string | null>(null);
 	let targets = $state<Target[]>([]);
 	let findings = $state<Finding[]>([]);
@@ -21,26 +20,14 @@ function createAppState() {
 	let selectedFindingDetail = $state<FindingDetail | null>(null);
 	let filters = $state<FindingFilters>({ activeOnly: true });
 	let rendererType = $state<RendererType>('3d');
-	let loading = $state(false);
 	let error = $state<string | null>(null);
 
 	return {
-		get projects() {
-			return projects;
-		},
-		set projects(v: Project[]) {
-			projects = v;
-		},
-
 		get selectedProjectId() {
 			return selectedProjectId;
 		},
 		set selectedProjectId(v: string | null) {
 			selectedProjectId = v;
-		},
-
-		get selectedProject(): Project | undefined {
-			return projects.find((p) => p.id === selectedProjectId);
 		},
 
 		get targets() {
@@ -92,13 +79,6 @@ function createAppState() {
 			rendererType = v;
 		},
 
-		get loading() {
-			return loading;
-		},
-		set loading(v: boolean) {
-			loading = v;
-		},
-
 		get error() {
 			return error;
 		},
@@ -107,7 +87,6 @@ function createAppState() {
 		},
 
 		reset() {
-			projects = [];
 			selectedProjectId = null;
 			targets = [];
 			findings = [];
@@ -116,7 +95,6 @@ function createAppState() {
 			selectedFindingDetail = null;
 			filters = { activeOnly: true };
 			rendererType = '3d';
-			loading = false;
 			error = null;
 		},
 	};

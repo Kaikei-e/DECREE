@@ -1,5 +1,6 @@
 <script lang="ts">
-import { api } from '$lib/api/client';
+import { page } from '$app/state';
+import { getFindingDetail } from '$lib/api/client';
 import DetailPanel from '$lib/components/DetailPanel.svelte';
 import FilterBar from '$lib/components/FilterBar.svelte';
 import NodeTooltip from '$lib/components/NodeTooltip.svelte';
@@ -10,8 +11,9 @@ import type { FindingFilters, RendererType } from '$lib/state/app.svelte';
 import { appState } from '$lib/state/app.svelte';
 import { timelineState } from '$lib/state/timeline.svelte';
 
+let { data } = $props();
+
 let hoveredNode = $state<{ id: string; x: number; y: number } | null>(null);
-let topRisks = $state<import('$lib/types/api').Finding[]>([]);
 
 const ecosystems = $derived([...new Set(appState.findings.map((f) => f.ecosystem))].sort());
 
@@ -19,22 +21,11 @@ const graphNode = $derived(
 	hoveredNode ? (appState.graphModel.nodes.get(hoveredNode.id) ?? null) : null,
 );
 
-// Load top risks
-$effect(() => {
-	if (appState.selectedProjectId) {
-		api.getTopRisks(appState.selectedProjectId).then((r) => {
-			topRisks = r;
-		});
-	}
-});
-
 function onNodeClick(nodeId: string) {
 	appState.selectedNodeId = nodeId;
-	if (appState.selectedProjectId) {
-		api.getFindingDetail(nodeId).then((detail) => {
-			appState.selectedFindingDetail = detail;
-		});
-	}
+	getFindingDetail(nodeId).then((detail) => {
+		appState.selectedFindingDetail = detail;
+	});
 }
 
 function onNodeHover(nodeId: string | null, position?: { x: number; y: number }) {
@@ -77,11 +68,7 @@ const maxDate = $derived(new Date().toISOString());
 		/>
 	</div>
 
-	{#if appState.loading}
-		<div class="flex flex-1 items-center justify-center">
-			<p class="font-mono text-hud-text-muted hud-live-pulse">Loading visualization...</p>
-		</div>
-	{:else if appState.error}
+	{#if appState.error}
 		<div class="flex flex-1 items-center justify-center">
 			<p class="font-mono text-hud-danger">{appState.error}</p>
 		</div>
@@ -97,7 +84,7 @@ const maxDate = $derived(new Date().toISOString());
 
 			<!-- Top Risks Overlay -->
 			<div class="absolute left-3 top-3 w-56">
-				<TopRisksSummary risks={topRisks} onSelect={onNodeClick} />
+				<TopRisksSummary risks={data.topRisks} onSelect={onNodeClick} />
 			</div>
 
 			<!-- Node Tooltip -->

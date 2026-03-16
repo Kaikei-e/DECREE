@@ -41,8 +41,12 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
 	return `?${qs.join('&')}`;
 }
 
-async function request<T>(path: string, unwrapData = true): Promise<T> {
-	const res = await fetch(`${BASE_URL}${path}`);
+async function request<T>(
+	path: string,
+	unwrapData = true,
+	customFetch: typeof fetch = fetch,
+): Promise<T> {
+	const res = await customFetch(`${BASE_URL}${path}`);
 	if (!res.ok) {
 		const body = (await res.json()) as ApiError;
 		throw body;
@@ -60,36 +64,55 @@ async function request<T>(path: string, unwrapData = true): Promise<T> {
 	return body as T;
 }
 
-export class ApiClient {
-	getProjects(): Promise<Project[]> {
-		return request<Project[]>('/api/projects');
-	}
-
-	getTargets(projectId: string): Promise<Target[]> {
-		return request<Target[]>(`/api/projects/${projectId}/targets`);
-	}
-
-	getFindings(projectId: string, params?: FindingFilterParams): Promise<PagedResponse<Finding>> {
-		const qs = buildQuery((params ?? {}) as Record<string, string | number | boolean | undefined>);
-		return request<PagedResponse<Finding>>(`/api/projects/${projectId}/findings${qs}`, false);
-	}
-
-	getFindingDetail(instanceId: string): Promise<FindingDetail> {
-		return request<FindingDetail>(`/api/findings/${instanceId}`);
-	}
-
-	getTopRisks(projectId: string, limit?: number): Promise<Finding[]> {
-		const qs = buildQuery({ limit });
-		return request<Finding[]>(`/api/projects/${projectId}/top-risks${qs}`);
-	}
-
-	getTimeline(
-		projectId: string,
-		params?: TimelineFilterParams,
-	): Promise<PagedResponse<TimelineEvent>> {
-		const qs = buildQuery((params ?? {}) as Record<string, string | number | boolean | undefined>);
-		return request<PagedResponse<TimelineEvent>>(`/api/projects/${projectId}/timeline${qs}`, false);
-	}
+export function getProjects(customFetch: typeof fetch = fetch): Promise<Project[]> {
+	return request<Project[]>('/api/projects', true, customFetch);
 }
 
-export const api = new ApiClient();
+export function getTargets(
+	projectId: string,
+	customFetch: typeof fetch = fetch,
+): Promise<Target[]> {
+	return request<Target[]>(`/api/projects/${projectId}/targets`, true, customFetch);
+}
+
+export function getFindings(
+	projectId: string,
+	params?: FindingFilterParams,
+	customFetch: typeof fetch = fetch,
+): Promise<PagedResponse<Finding>> {
+	const qs = buildQuery((params ?? {}) as Record<string, string | number | boolean | undefined>);
+	return request<PagedResponse<Finding>>(
+		`/api/projects/${projectId}/findings${qs}`,
+		false,
+		customFetch,
+	);
+}
+
+export function getFindingDetail(
+	instanceId: string,
+	customFetch: typeof fetch = fetch,
+): Promise<FindingDetail> {
+	return request<FindingDetail>(`/api/findings/${instanceId}`, true, customFetch);
+}
+
+export function getTopRisks(
+	projectId: string,
+	limit?: number,
+	customFetch: typeof fetch = fetch,
+): Promise<Finding[]> {
+	const qs = buildQuery({ limit });
+	return request<Finding[]>(`/api/projects/${projectId}/top-risks${qs}`, true, customFetch);
+}
+
+export function getTimeline(
+	projectId: string,
+	params?: TimelineFilterParams,
+	customFetch: typeof fetch = fetch,
+): Promise<PagedResponse<TimelineEvent>> {
+	const qs = buildQuery((params ?? {}) as Record<string, string | number | boolean | undefined>);
+	return request<PagedResponse<TimelineEvent>>(
+		`/api/projects/${projectId}/timeline${qs}`,
+		false,
+		customFetch,
+	);
+}

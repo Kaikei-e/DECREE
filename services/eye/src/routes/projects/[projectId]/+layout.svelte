@@ -1,24 +1,32 @@
 <script lang="ts">
-import { onDestroy } from 'svelte';
 import { page } from '$app/state';
-import { api } from '$lib/api/client';
+import { getFindings } from '$lib/api/client';
 import { computeLayout } from '$lib/graph/layout';
 import { appState } from '$lib/state/app.svelte';
 import { sseManager } from '$lib/state/sse-manager.svelte';
 
-let { children } = $props();
+let { children, data } = $props();
 
 const projectId = $derived(page.params.projectId);
 
-// Load project metadata (targets, topRisks) + connect SSE on project change
+// Initialize state from load data and connect SSE
 $effect(() => {
 	const id = projectId;
-	if (id) loadProject(id);
+	if (!id) return;
+
+	appState.selectedProjectId = id;
+	appState.targets = data.targets;
+	appState.findings = data.findings;
+	appState.graphModel = computeLayout(data.findings, data.targets);
+	sseManager.connect(id);
+
+	return () => {
+		sseManager.disconnect();
+	};
 });
 
 // Re-fetch findings when filters change
 $effect(() => {
-	// Read each filter property to establish Svelte 5 fine-grained tracking
 	const _severity = appState.filters.severity;
 	const _ecosystem = appState.filters.ecosystem;
 	const _minEpss = appState.filters.minEpss;
@@ -27,31 +35,9 @@ $effect(() => {
 	if (id) loadFindings(id);
 });
 
-async function loadProject(id: string) {
-	appState.loading = true;
-	appState.error = null;
-
-	try {
-		appState.selectedProjectId = id;
-
-		const [targets, topRisks] = await Promise.all([
-			api.getTargets(id),
-			api.getTopRisks(id),
-		]);
-
-		appState.targets = targets;
-		await loadFindings(id);
-		sseManager.connect(id);
-	} catch (e) {
-		appState.error = e instanceof Error ? e.message : 'Failed to load project';
-	} finally {
-		appState.loading = false;
-	}
-}
-
 async function loadFindings(id: string) {
 	try {
-		const findingsRes = await api.getFindings(id, {
+		const findingsRes = await getFindings(id, {
 			severity: appState.filters.severity,
 			ecosystem: appState.filters.ecosystem,
 			min_epss: appState.filters.minEpss,
@@ -63,10 +49,6 @@ async function loadFindings(id: string) {
 		appState.error = e instanceof Error ? e.message : 'Failed to load findings';
 	}
 }
-
-onDestroy(() => {
-	sseManager.disconnect();
-});
 </script>
 
 {@render children()}

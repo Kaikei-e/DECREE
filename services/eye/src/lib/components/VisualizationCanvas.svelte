@@ -1,5 +1,4 @@
 <script lang="ts">
-import { onMount } from 'svelte';
 import type { GraphModel } from '$lib/graph/model';
 import { createRenderer, type RendererChoice } from '$lib/renderer/factory';
 import type { SceneRenderer } from '$lib/renderer/types';
@@ -50,18 +49,17 @@ $effect(() => {
 });
 
 $effect(() => {
-	// Update graph model when it changes
 	if (renderer) {
 		renderer.setGraphModel(graphModel);
 	}
 });
 
-onMount(() => {
+// ResizeObserver via $effect cleanup (replaces onMount)
+$effect(() => {
+	if (!containerEl) return;
 	const observer = new ResizeObserver(() => renderer?.resize());
-	if (containerEl) observer.observe(containerEl);
-	return () => {
-		observer.disconnect();
-	};
+	observer.observe(containerEl);
+	return () => observer.disconnect();
 });
 
 function handleKeydown(e: KeyboardEvent) {

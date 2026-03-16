@@ -5,7 +5,14 @@ vi.mock('$env/dynamic/public', () => ({
 	env: { PUBLIC_GATEWAY_URL: 'http://localhost:8400' },
 }));
 
-import { ApiClient } from './client';
+import {
+	getFindingDetail,
+	getFindings,
+	getProjects,
+	getTargets,
+	getTimeline,
+	getTopRisks,
+} from './client';
 
 const BASE = 'http://localhost:8400';
 
@@ -16,12 +23,10 @@ function jsonResponse(body: unknown, status = 200) {
 	});
 }
 
-describe('ApiClient', () => {
-	let client: ApiClient;
+describe('api client functions', () => {
 	let fetchSpy: ReturnType<typeof vi.fn>;
 
 	beforeEach(() => {
-		client = new ApiClient();
 		fetchSpy = vi.fn();
 		vi.stubGlobal('fetch', fetchSpy);
 	});
@@ -31,15 +36,26 @@ describe('ApiClient', () => {
 	});
 
 	it('getProjects calls correct URL', async () => {
-		fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [{ id: '1', name: 'p', created_at: '' }] }));
-		const result = await client.getProjects();
+		fetchSpy.mockResolvedValueOnce(
+			jsonResponse({ data: [{ id: '1', name: 'p', created_at: '' }] }),
+		);
+		const result = await getProjects();
 		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/projects`);
 		expect(result).toEqual([{ id: '1', name: 'p', created_at: '' }]);
 	});
 
+	it('getProjects accepts custom fetch', async () => {
+		const customFetch = vi
+			.fn()
+			.mockResolvedValueOnce(jsonResponse({ data: [{ id: '2', name: 'q', created_at: '' }] }));
+		const result = await getProjects(customFetch);
+		expect(customFetch).toHaveBeenCalledWith(`${BASE}/api/projects`);
+		expect(result).toEqual([{ id: '2', name: 'q', created_at: '' }]);
+	});
+
 	it('getTargets calls correct URL with projectId', async () => {
 		fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [] }));
-		const result = await client.getTargets('proj-1');
+		const result = await getTargets('proj-1');
 		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/projects/proj-1/targets`);
 		expect(result).toEqual([]);
 	});
@@ -47,14 +63,14 @@ describe('ApiClient', () => {
 	it('getFindings calls correct URL without params', async () => {
 		const body: PagedResponse<unknown> = { data: [], has_more: false };
 		fetchSpy.mockResolvedValueOnce(jsonResponse(body));
-		await client.getFindings('proj-1');
+		await getFindings('proj-1');
 		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/projects/proj-1/findings`);
 	});
 
 	it('getFindings builds query string from params', async () => {
 		const body: PagedResponse<unknown> = { data: [], has_more: false };
 		fetchSpy.mockResolvedValueOnce(jsonResponse(body));
-		await client.getFindings('proj-1', { severity: 'high', active_only: true, limit: 25 });
+		await getFindings('proj-1', { severity: 'high', active_only: true, limit: 25 });
 		const url = fetchSpy.mock.calls[0]?.[0] as string;
 		expect(url).toContain('severity=high');
 		expect(url).toContain('active_only=true');
@@ -80,21 +96,21 @@ describe('ApiClient', () => {
 				},
 			}),
 		);
-		const result = await client.getFindingDetail('i-1');
+		const result = await getFindingDetail('i-1');
 		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/findings/i-1`);
 		expect(result.instance_id).toBe('i-1');
 	});
 
 	it('getTopRisks calls correct URL with optional limit', async () => {
 		fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [] }));
-		const result = await client.getTopRisks('proj-1', 10);
+		const result = await getTopRisks('proj-1', 10);
 		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/projects/proj-1/top-risks?limit=10`);
 		expect(result).toEqual([]);
 	});
 
 	it('getTopRisks omits limit when not provided', async () => {
 		fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [] }));
-		const result = await client.getTopRisks('proj-1');
+		const result = await getTopRisks('proj-1');
 		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/projects/proj-1/top-risks`);
 		expect(result).toEqual([]);
 	});
@@ -102,7 +118,7 @@ describe('ApiClient', () => {
 	it('getTimeline calls correct URL with params', async () => {
 		const body: PagedResponse<unknown> = { data: [], has_more: false };
 		fetchSpy.mockResolvedValueOnce(jsonResponse(body));
-		await client.getTimeline('proj-1', { target_id: 't-1', event_type: 'observed' });
+		await getTimeline('proj-1', { target_id: 't-1', event_type: 'observed' });
 		const url = fetchSpy.mock.calls[0]?.[0] as string;
 		expect(url).toContain('/api/projects/proj-1/timeline?');
 		expect(url).toContain('target_id=t-1');
@@ -112,12 +128,12 @@ describe('ApiClient', () => {
 	it('throws ApiError on non-ok response', async () => {
 		const apiError: ApiError = { error: { code: 'NOT_FOUND', message: 'not found' } };
 		fetchSpy.mockResolvedValueOnce(jsonResponse(apiError, 404));
-		await expect(client.getProjects()).rejects.toEqual(apiError);
+		await expect(getProjects()).rejects.toEqual(apiError);
 	});
 
 	it('throws ApiError on server error', async () => {
 		const apiError: ApiError = { error: { code: 'INTERNAL', message: 'boom' } };
 		fetchSpy.mockResolvedValueOnce(jsonResponse(apiError, 500));
-		await expect(client.getFindingDetail('x')).rejects.toEqual(apiError);
+		await expect(getFindingDetail('x')).rejects.toEqual(apiError);
 	});
 });
