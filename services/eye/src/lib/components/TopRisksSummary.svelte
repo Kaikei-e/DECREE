@@ -11,7 +11,7 @@ interface Props {
 const { risks, onSelect }: Props = $props();
 </script>
 
-<div class="hud-panel bg-hud-base/90 backdrop-blur">
+<div class="flex h-full min-h-0 flex-col hud-panel bg-hud-base/90 backdrop-blur">
 	<div class="border-b border-hud-border px-4 py-3">
 		<div class="flex items-start justify-between gap-3">
 			<div>
@@ -28,7 +28,7 @@ const { risks, onSelect }: Props = $props();
 	{#if risks.length === 0}
 		<div class="px-4 py-6 text-sm text-hud-text-secondary">No findings match the current filter set.</div>
 	{:else}
-		<ul class="max-h-[24rem] overflow-y-auto">
+		<ul class="min-h-0 flex-1 overflow-y-auto">
 			{#each risks as risk, index}
 				<li class="border-b border-hud-border/60 last:border-b-0">
 					<button

@@ -73,27 +73,45 @@ const maxDate = $derived(new Date().toISOString());
 		</div>
 	{:else}
 		<div class="min-h-0 flex-1 px-2 pb-2">
-			<div class="flex h-full min-h-0 flex-col gap-3">
-				<SceneGuide summary={sceneSummary} rendererType={appState.rendererType} />
+			<div class="grid h-full min-h-0 gap-3 xl:grid-cols-[minmax(0,1fr)_20rem]">
+				<div class="flex min-h-0 flex-col gap-3">
+					<SceneGuide summary={sceneSummary} rendererType={appState.rendererType} />
 
-				<div class="grid min-h-0 flex-1 gap-3 xl:grid-cols-[21rem_minmax(0,1fr)]">
-					<div class="min-h-0">
-						<TopRisksSummary risks={topVisibleRisks} onSelect={onNodeClick} />
-					</div>
-
-					<div class="relative min-h-[28rem] overflow-hidden hud-panel hud-scanlines bg-hud-void/96">
-						<div class="absolute left-4 top-4 z-10 max-w-sm rounded-sm border border-hud-border bg-hud-base/85 px-4 py-3 backdrop-blur">
-							<p class="hud-header">How To Read This Space</p>
-							<p class="mt-2 text-sm leading-6 text-hud-text">
-								1 orb = 1 finding. Read upward for higher DECREE Score, scan left-to-right by target,
-								and use color plus glow to spot severity and EPSS.
+					<div class="relative min-h-[30rem] flex-1 overflow-hidden hud-panel hud-scanlines bg-hud-void/96">
+						<div class="absolute left-4 top-4 z-10 max-w-xs rounded-sm border border-hud-border bg-hud-base/76 px-3 py-2 backdrop-blur">
+							<p class="hud-header">Spatial Inspection</p>
+							<p class="mt-1 text-xs leading-5 text-hud-text-secondary">
+								Drag to orbit, use the camera tools for fast resets, and read the scene from cluster
+								shape before drilling into a node.
 							</p>
 						</div>
 
-						<div class="absolute bottom-4 left-4 z-10 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.14em] text-hud-text-secondary">
-							<span class="rounded-sm border border-hud-border bg-hud-base/85 px-2 py-1">Clusters = targets</span>
-							<span class="rounded-sm border border-hud-border bg-hud-base/85 px-2 py-1">Height = DECREE</span>
-							<span class="rounded-sm border border-hud-border bg-hud-base/85 px-2 py-1">Brightness = EPSS</span>
+						<div class="absolute bottom-4 left-4 z-10 rounded-sm border border-hud-border bg-hud-base/72 px-3 py-2 backdrop-blur">
+							<p class="hud-header">Read Order</p>
+							<p class="mt-1 text-[11px] uppercase tracking-[0.14em] text-hud-text-secondary">
+								Left to right = target lanes
+							</p>
+							<p class="mt-1 text-[11px] uppercase tracking-[0.14em] text-hud-text-secondary">
+								Low to high = DECREE urgency
+							</p>
+						</div>
+
+						<div class="absolute inset-y-20 left-4 z-10 hidden w-10 items-center justify-center md:flex">
+							<div class="flex h-full flex-col items-center justify-between rounded-full border border-hud-border bg-hud-base/58 px-2 py-3 backdrop-blur">
+								<span class="font-mono text-[10px] uppercase tracking-[0.16em] text-hud-text-secondary [writing-mode:vertical-rl] [text-orientation:mixed]">
+									High DECREE
+								</span>
+								<span class="h-full w-px bg-linear-to-b from-hud-accent via-hud-border-bright to-hud-border"></span>
+								<span class="font-mono text-[10px] uppercase tracking-[0.16em] text-hud-text-muted [writing-mode:vertical-rl] [text-orientation:mixed]">
+									Low
+								</span>
+							</div>
+						</div>
+
+						<div class="absolute bottom-4 right-4 z-10 flex flex-wrap justify-end gap-2 text-[11px] uppercase tracking-[0.14em] text-hud-text-secondary">
+							<span class="rounded-sm border border-hud-border bg-hud-base/72 px-2 py-1 backdrop-blur">Orb = instance</span>
+							<span class="rounded-sm border border-hud-border bg-hud-base/72 px-2 py-1 backdrop-blur">Color = severity</span>
+							<span class="rounded-sm border border-hud-border bg-hud-base/72 px-2 py-1 backdrop-blur">Glow = EPSS</span>
 						</div>
 
 						<VisualizationCanvas
@@ -105,6 +123,10 @@ const maxDate = $derived(new Date().toISOString());
 
 						<NodeTooltip node={graphNode} x={hoveredNode?.x ?? 0} y={hoveredNode?.y ?? 0} />
 					</div>
+				</div>
+
+				<div class="min-h-0">
+					<TopRisksSummary risks={topVisibleRisks} onSelect={onNodeClick} />
 				</div>
 			</div>
 		</div>
