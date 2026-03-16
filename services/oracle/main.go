@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/errgroup"
 
 	"decree/services/oracle/internal/config"
 	"decree/services/oracle/internal/db"
@@ -40,8 +40,8 @@ func main() {
 
 	slog.Info("config loaded", "project", cfg.Project.Name)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	// DB pool
 	database, err := db.Connect(ctx, cfg.DB.URL)
@@ -117,54 +117,42 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	var wg sync.WaitGroup
+	g, gCtx := errgroup.WithContext(ctx)
 
-	// Start health server
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	// Health server
+	g.Go(func() error {
 		slog.Info("decree-oracle starting", "addr", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server failed", "error", err)
-			cancel()
+			return err
 		}
-	}()
+		return nil
+	})
 
-	// Start scheduler
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		if err := sched.Run(ctx); err != nil {
-			slog.Error("scheduler failed", "error", err)
-		}
-	}()
+	// Scheduler
+	g.Go(func() error {
+		return sched.Run(gCtx)
+	})
 
-	// Start stream consumer
+	// Stream consumer
 	if cfg.Diff.Enabled {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := consumer.Run(ctx, []string{"scan-events"}); err != nil {
-				slog.Error("stream consumer failed", "error", err)
-			}
-		}()
+		g.Go(func() error {
+			return consumer.Run(gCtx, []string{"scan-events"})
+		})
 	}
 
-	// Graceful shutdown
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-quit
-	slog.Info("shutting down", "signal", sig.String())
+	// Graceful shutdown: wait for context cancellation, then shut down HTTP server
+	g.Go(func() error {
+		<-gCtx.Done()
+		slog.Info("shutting down")
 
-	cancel()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer shutdownCancel()
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
+		return srv.Shutdown(shutdownCtx)
+	})
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("http shutdown error", "error", err)
+	if err := g.Wait(); err != nil {
+		slog.Error("oracle exited with error", "error", err)
 	}
-
-	wg.Wait()
 	slog.Info("decree-oracle stopped")
 }

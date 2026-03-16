@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"decree/services/oracle/internal/db"
 	"decree/services/oracle/internal/diff"
+	"decree/services/oracle/internal/domain"
 )
 
 // ChannelConfig pairs a channel with its severity threshold.
@@ -15,18 +15,32 @@ type ChannelConfig struct {
 	Threshold string // "critical", "high", "medium", "low"
 }
 
+// RouterOption configures the Router.
+type RouterOption func(*Router)
+
+// WithRouterLogger sets a custom logger for the Router.
+func WithRouterLogger(l *slog.Logger) RouterOption {
+	return func(r *Router) { r.log = l }
+}
+
 // Router dispatches diff events to notification channels with filtering and dedup.
 type Router struct {
-	db       *db.DB
+	store    DeliveryStore
 	channels []ChannelConfig
+	log      *slog.Logger
 }
 
 // NewRouter creates a notification router.
-func NewRouter(database *db.DB, channels []ChannelConfig) *Router {
-	return &Router{
-		db:       database,
+func NewRouter(store DeliveryStore, channels []ChannelConfig, opts ...RouterOption) *Router {
+	r := &Router{
+		store:    store,
 		channels: channels,
+		log:      slog.Default(),
 	}
+	for _, o := range opts {
+		o(r)
+	}
+	return r
 }
 
 // Notify sends notifications for diff events to all configured channels.
@@ -42,12 +56,12 @@ func (r *Router) Notify(ctx context.Context, events []diff.DiffEvent) {
 
 			// Dedup check
 			dedupKey := DedupKey(evt.TargetID, evt.AdvisoryID, string(evt.Kind))
-			if r.db != nil {
-				dup, err := r.db.CheckDedup(ctx, dedupKey, cc.Channel.Name())
+			if r.store != nil {
+				dup, err := r.store.CheckDedup(ctx, dedupKey, cc.Channel.Name())
 				if err != nil {
-					slog.Error("dedup check failed", "error", err)
+					r.log.ErrorContext(ctx, "dedup check failed", "error", err)
 				} else if dup {
-					slog.Debug("notification deduplicated",
+					r.log.DebugContext(ctx, "notification deduplicated",
 						"channel", cc.Channel.Name(),
 						"advisory", evt.AdvisoryID)
 					continue
@@ -58,12 +72,12 @@ func (r *Router) Notify(ctx context.Context, events []diff.DiffEvent) {
 			err := r.sendWithRetry(ctx, cc.Channel, msg)
 
 			// Log delivery
-			if r.db != nil {
+			if r.store != nil {
 				status := "delivered"
 				if err != nil {
 					status = "failed"
 				}
-				logErr := r.db.InsertDeliveryLog(ctx, db.DeliveryRecord{
+				logErr := r.store.InsertDeliveryLog(ctx, domain.DeliveryRecord{
 					TargetID:   evt.TargetID,
 					AdvisoryID: evt.AdvisoryID,
 					DiffKind:   string(evt.Kind),
@@ -73,17 +87,17 @@ func (r *Router) Notify(ctx context.Context, events []diff.DiffEvent) {
 					DedupKey:   dedupKey,
 				})
 				if logErr != nil {
-					slog.Error("delivery log insert failed", "error", logErr)
+					r.log.ErrorContext(ctx, "delivery log insert failed", "error", logErr)
 				}
 			}
 
 			if err != nil {
-				slog.Error("notification send failed",
+				r.log.ErrorContext(ctx, "notification send failed",
 					"channel", cc.Channel.Name(),
 					"advisory", evt.AdvisoryID,
 					"error", err)
 			} else {
-				slog.Info("notification sent",
+				r.log.InfoContext(ctx, "notification sent",
 					"channel", cc.Channel.Name(),
 					"advisory", evt.AdvisoryID,
 					"kind", evt.Kind)
@@ -104,7 +118,7 @@ func (r *Router) sendWithRetry(ctx context.Context, ch Channel, msg Notification
 		lastErr = err
 
 		if attempt < len(backoffs) {
-			slog.Warn("notification send failed, retrying",
+			r.log.WarnContext(ctx, "notification send failed, retrying",
 				"channel", ch.Name(), "attempt", attempt+1, "error", err)
 			select {
 			case <-ctx.Done():

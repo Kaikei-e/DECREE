@@ -1,12 +1,11 @@
 package notify
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // SlackChannel sends notifications via Slack webhook using Block Kit.
@@ -19,7 +18,7 @@ type SlackChannel struct {
 func NewSlackChannel(webhookURL string) *SlackChannel {
 	return &SlackChannel{
 		webhookURL: webhookURL,
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -27,29 +26,7 @@ func (s *SlackChannel) Name() string { return "slack" }
 
 func (s *SlackChannel) Send(ctx context.Context, msg NotificationMessage) error {
 	payload := s.buildPayload(msg)
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal slack payload: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.webhookURL, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create slack request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("slack webhook: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("slack returned %d", resp.StatusCode)
-	}
-
-	return nil
+	return sendJSON(ctx, s.httpClient, http.MethodPost, s.webhookURL, nil, payload, http.StatusOK)
 }
 
 func (s *SlackChannel) buildPayload(msg NotificationMessage) map[string]any {
@@ -86,7 +63,7 @@ func (s *SlackChannel) buildPayload(msg NotificationMessage) map[string]any {
 	return map[string]any{
 		"attachments": []map[string]any{
 			{
-				"color":  color,
+				"color": color,
 				"blocks": []map[string]any{
 					{
 						"type": "header",

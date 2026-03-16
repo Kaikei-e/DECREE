@@ -1,12 +1,11 @@
 package notify
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // DiscordChannel sends notifications via Discord webhook using embeds.
@@ -19,7 +18,7 @@ type DiscordChannel struct {
 func NewDiscordChannel(webhookURL string) *DiscordChannel {
 	return &DiscordChannel{
 		webhookURL: webhookURL,
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -27,30 +26,7 @@ func (d *DiscordChannel) Name() string { return "discord" }
 
 func (d *DiscordChannel) Send(ctx context.Context, msg NotificationMessage) error {
 	payload := d.buildPayload(msg)
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("marshal discord payload: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.webhookURL, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create discord request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := d.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("discord webhook: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Discord returns 204 No Content on success
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("discord returned %d", resp.StatusCode)
-	}
-
-	return nil
+	return sendJSON(ctx, d.httpClient, http.MethodPost, d.webhookURL, nil, payload, http.StatusOK, http.StatusNoContent)
 }
 
 func (d *DiscordChannel) buildPayload(msg NotificationMessage) map[string]any {

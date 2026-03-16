@@ -10,13 +10,13 @@ import (
 )
 
 type Config struct {
-	Project  ProjectConfig  `yaml:"project"`
-	Targets  TargetsConfig  `yaml:"targets"`
-	Scan     ScanConfig     `yaml:"scan"`
-	Diff     DiffConfig     `yaml:"diff"`
-	Notify   NotifyConfig   `yaml:"notify"`
-	DB       DBConfig       `yaml:"-"`
-	RedisURL string         `yaml:"-"`
+	Project  ProjectConfig     `yaml:"project"`
+	Targets  TargetsConfig     `yaml:"targets"`
+	Scan     ScanConfig        `yaml:"scan"`
+	Diff     DiffConfig        `yaml:"diff"`
+	Notify   NotifyConfig      `yaml:"notify"`
+	DB       DBConfig          `yaml:"-"`
+	RedisURL string            `yaml:"-"`
 	Scanner  ScannerConnConfig `yaml:"-"`
 }
 
@@ -41,8 +41,8 @@ type ContainerTarget struct {
 }
 
 type ScanConfig struct {
-	Interval             Duration                `yaml:"interval"`
-	InitialScan          bool                    `yaml:"initial_scan"`
+	Interval             Duration                   `yaml:"interval"`
+	InitialScan          bool                       `yaml:"initial_scan"`
 	VulnerabilityRefresh VulnerabilityRefreshConfig `yaml:"vulnerability_refresh"`
 }
 
@@ -64,8 +64,8 @@ type NotifyConfig struct {
 }
 
 type SlackConfig struct {
-	WebhookURL        string `yaml:"webhook_url"`
-	SeverityThreshold string `yaml:"severity_threshold"`
+	WebhookURL         string `yaml:"webhook_url"`
+	SeverityThreshold  string `yaml:"severity_threshold"`
 	IncludeDecreeScore bool   `yaml:"include_decree_score"`
 }
 

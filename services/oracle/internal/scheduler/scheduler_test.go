@@ -12,12 +12,12 @@ import (
 	"github.com/google/uuid"
 
 	"decree/services/oracle/internal/config"
-	"decree/services/oracle/internal/db"
+	"decree/services/oracle/internal/domain"
 	"decree/services/oracle/internal/scanner"
 )
 
-func db_target(name string) db.Target {
-	return db.Target{
+func dbTarget(name string) domain.Target {
+	return domain.Target{
 		ID:   uuid.New(),
 		Name: name,
 	}
@@ -81,7 +81,7 @@ func TestScheduler_PollScanStatus_Completed(t *testing.T) {
 	// pollScanStatus should return quickly when status is completed
 	done := make(chan struct{})
 	go func() {
-		s.pollScanStatus(ctx, db_target("test"), "scan-1")
+		s.pollScanStatus(ctx, dbTarget("test"), "scan-1")
 		close(done)
 	}()
 
@@ -122,7 +122,7 @@ func TestScheduler_PollScanStatus_Failed(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		s.pollScanStatus(ctx, db_target("fail-test"), "scan-2")
+		s.pollScanStatus(ctx, dbTarget("fail-test"), "scan-2")
 		close(done)
 	}()
 

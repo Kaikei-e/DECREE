@@ -2,13 +2,21 @@ package stream
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"os"
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"decree/services/oracle/internal/identity"
 )
+
+// ConsumerOption configures the Consumer.
+type ConsumerOption func(*Consumer)
+
+// WithConsumerLogger sets a custom logger for the Consumer.
+func WithConsumerLogger(l *slog.Logger) ConsumerOption {
+	return func(c *Consumer) { c.log = l }
+}
 
 // Consumer reads from Redis Streams using XREADGROUP.
 type Consumer struct {
@@ -16,6 +24,7 @@ type Consumer struct {
 	group        string
 	consumerName string
 	handler      Handler
+	log          *slog.Logger
 }
 
 // Handler processes a stream message.
@@ -24,19 +33,23 @@ type Handler interface {
 }
 
 // NewConsumer creates a stream consumer.
-func NewConsumer(rdb *redis.Client, handler Handler) *Consumer {
-	hostname, _ := os.Hostname()
-	return &Consumer{
+func NewConsumer(rdb *redis.Client, handler Handler, opts ...ConsumerOption) *Consumer {
+	c := &Consumer{
 		rdb:          rdb,
 		group:        "oracle-diff",
-		consumerName: fmt.Sprintf("oracle-%s-%d", hostname, os.Getpid()),
+		consumerName: identity.OracleConsumerID(),
 		handler:      handler,
+		log:          slog.Default(),
 	}
+	for _, o := range opts {
+		o(c)
+	}
+	return c
 }
 
 // Run starts the consumer loop. It blocks until ctx is cancelled.
 func (c *Consumer) Run(ctx context.Context, streams []string) error {
-	slog.Info("stream consumer starting",
+	c.log.InfoContext(ctx, "stream consumer starting",
 		"group", c.group,
 		"consumer", c.consumerName,
 		"streams", streams)
@@ -56,7 +69,7 @@ func (c *Consumer) Run(ctx context.Context, streams []string) error {
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Info("stream consumer stopping")
+			c.log.InfoContext(ctx, "stream consumer stopping")
 			return nil
 		default:
 		}
@@ -73,7 +86,7 @@ func (c *Consumer) Run(ctx context.Context, streams []string) error {
 			if err == redis.Nil || ctx.Err() != nil {
 				continue
 			}
-			slog.Error("XREADGROUP failed", "error", err)
+			c.log.ErrorContext(ctx, "XREADGROUP failed", "error", err)
 			time.Sleep(1 * time.Second)
 			continue
 		}
@@ -81,7 +94,7 @@ func (c *Consumer) Run(ctx context.Context, streams []string) error {
 		for _, stream := range results {
 			for _, msg := range stream.Messages {
 				if err := c.handler.Handle(ctx, stream.Stream, msg); err != nil {
-					slog.Error("message handling failed",
+					c.log.ErrorContext(ctx, "message handling failed",
 						"stream", stream.Stream,
 						"id", msg.ID,
 						"error", err)
@@ -90,7 +103,7 @@ func (c *Consumer) Run(ctx context.Context, streams []string) error {
 				}
 
 				if err := c.rdb.XAck(ctx, stream.Stream, c.group, msg.ID).Err(); err != nil {
-					slog.Error("XACK failed", "stream", stream.Stream, "id", msg.ID, "error", err)
+					c.log.ErrorContext(ctx, "XACK failed", "stream", stream.Stream, "id", msg.ID, "error", err)
 				}
 			}
 		}
@@ -109,13 +122,13 @@ func (c *Consumer) recoverPending(ctx context.Context, streams []string) {
 		}).Result()
 
 		if err != nil {
-			slog.Warn("XAUTOCLAIM failed", "stream", stream, "error", err)
+			c.log.WarnContext(ctx, "XAUTOCLAIM failed", "stream", stream, "error", err)
 			continue
 		}
 
 		for _, msg := range claimed {
 			if err := c.handler.Handle(ctx, stream, msg); err != nil {
-				slog.Error("pending message handling failed",
+				c.log.ErrorContext(ctx, "pending message handling failed",
 					"stream", stream, "id", msg.ID, "error", err)
 				continue
 			}
@@ -123,7 +136,7 @@ func (c *Consumer) recoverPending(ctx context.Context, streams []string) {
 		}
 
 		if len(claimed) > 0 {
-			slog.Info("recovered pending messages", "stream", stream, "count", len(claimed))
+			c.log.InfoContext(ctx, "recovered pending messages", "stream", stream, "count", len(claimed))
 		}
 	}
 }

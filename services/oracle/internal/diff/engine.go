@@ -8,43 +8,56 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"decree/services/oracle/internal/db"
+	"decree/services/oracle/internal/domain"
 )
+
+// EngineOption configures the Engine.
+type EngineOption func(*Engine)
+
+// WithLogger sets a custom logger for the Engine.
+func WithLogger(l *slog.Logger) EngineOption {
+	return func(e *Engine) { e.log = l }
+}
 
 // Engine detects differences between consecutive scans using fact tables only.
 type Engine struct {
-	db *db.DB
+	repo ObservationReader
+	log  *slog.Logger
 }
 
 // NewEngine creates a diff engine.
-func NewEngine(database *db.DB) *Engine {
-	return &Engine{db: database}
+func NewEngine(repo ObservationReader, opts ...EngineOption) *Engine {
+	e := &Engine{repo: repo, log: slog.Default()}
+	for _, o := range opts {
+		o(e)
+	}
+	return e
 }
 
 // Detect compares the current scan against the previous completed scan
 // and returns diff events. It reads only from fact tables.
 func (e *Engine) Detect(ctx context.Context, scanID, targetID uuid.UUID) ([]DiffEvent, error) {
-	targetName, err := e.db.GetTargetName(ctx, targetID)
+	targetName, err := e.repo.GetTargetName(ctx, targetID)
 	if err != nil {
 		return nil, err
 	}
-	projectID, err := e.db.GetTargetProjectID(ctx, targetID)
+	projectID, err := e.repo.GetTargetProjectID(ctx, targetID)
 	if err != nil {
 		return nil, err
 	}
 
 	// Get current observations
-	current, err := e.db.GetCurrentObservations(ctx, scanID)
+	current, err := e.repo.GetCurrentObservations(ctx, scanID)
 	if err != nil {
 		return nil, err
 	}
 
 	// Get previous scan
-	prevScanID, err := e.db.GetPreviousCompletedScanID(ctx, targetID, scanID)
+	prevScanID, err := e.repo.GetPreviousCompletedScanID(ctx, targetID, scanID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			// First scan — everything is new
-			slog.Info("first scan for target, all findings are new",
+			e.log.InfoContext(ctx, "first scan for target, all findings are new",
 				"target", targetName, "findings", len(current))
 			return e.allAsNew(ctx, current, scanID, targetID, targetName)
 		}
@@ -52,7 +65,7 @@ func (e *Engine) Detect(ctx context.Context, scanID, targetID uuid.UUID) ([]Diff
 	}
 
 	// Get previous observations
-	previous, err := e.db.GetCurrentObservations(ctx, prevScanID)
+	previous, err := e.repo.GetCurrentObservations(ctx, prevScanID)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +80,7 @@ func (e *Engine) Detect(ctx context.Context, scanID, targetID uuid.UUID) ([]Diff
 		cveIDs = append(cveIDs, obs.AdvisoryID)
 	}
 
-	currentExploits, err := e.db.GetExploitLinkedCVEs(ctx, cveIDs)
+	currentExploits, err := e.repo.GetExploitLinkedCVEs(ctx, cveIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +90,7 @@ func (e *Engine) Detect(ctx context.Context, scanID, targetID uuid.UUID) ([]Diff
 	for _, obs := range previous {
 		prevCVEIDs = append(prevCVEIDs, obs.AdvisoryID)
 	}
-	prevExploits, err := e.db.GetExploitLinkedCVEs(ctx, prevCVEIDs)
+	prevExploits, err := e.repo.GetExploitLinkedCVEs(ctx, prevCVEIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -97,8 +110,8 @@ func (e *Engine) Detect(ctx context.Context, scanID, targetID uuid.UUID) ([]Diff
 		if _, exists := currentMap[id]; !exists {
 			evt := buildEvent(DiffResolvedCVE, scanID, targetID, targetName, obs, nil)
 			// Record disappearance
-			if err := e.db.InsertDisappearance(ctx, id, scanID); err != nil {
-				slog.Error("insert disappearance failed", "instance_id", id, "error", err)
+			if err := e.repo.InsertDisappearance(ctx, id, scanID); err != nil {
+				e.log.ErrorContext(ctx, "insert disappearance failed", "instance_id", id, "error", err)
 			}
 			events = append(events, evt)
 		}
@@ -147,30 +160,22 @@ func (e *Engine) Detect(ctx context.Context, scanID, targetID uuid.UUID) ([]Diff
 			"epss_score":      evt.EPSSScore,
 			"has_exploit":     evt.HasExploit,
 		}
-		if err := e.db.InsertOutboxEvent(ctx, "finding-events", payload); err != nil {
-			slog.Error("insert outbox event failed", "error", err)
+		if err := e.repo.InsertOutboxEvent(ctx, "finding-events", payload); err != nil {
+			e.log.ErrorContext(ctx, "insert outbox event failed", "error", err)
 		}
 	}
 
-	// Enrich with fix versions
-	for i := range events {
-		versions, err := e.db.GetFixVersions(ctx, events[i].InstanceID)
-		if err != nil {
-			slog.Error("get fix versions failed", "instance_id", events[i].InstanceID, "error", err)
-			continue
-		}
-		events[i].FixVersions = versions
-	}
+	e.enrichFixVersions(ctx, events)
 
 	return events, nil
 }
 
-func (e *Engine) allAsNew(ctx context.Context, observations []db.Observation, scanID, targetID uuid.UUID, targetName string) ([]DiffEvent, error) {
+func (e *Engine) allAsNew(ctx context.Context, observations []domain.Observation, scanID, targetID uuid.UUID, targetName string) ([]DiffEvent, error) {
 	var cveIDs []string
 	for _, obs := range observations {
 		cveIDs = append(cveIDs, obs.AdvisoryID)
 	}
-	exploits, err := e.db.GetExploitLinkedCVEs(ctx, cveIDs)
+	exploits, err := e.repo.GetExploitLinkedCVEs(ctx, cveIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -181,28 +186,31 @@ func (e *Engine) allAsNew(ctx context.Context, observations []db.Observation, sc
 		events = append(events, evt)
 	}
 
-	// Enrich with fix versions
-	for i := range events {
-		versions, err := e.db.GetFixVersions(ctx, events[i].InstanceID)
-		if err != nil {
-			slog.Error("get fix versions failed", "instance_id", events[i].InstanceID, "error", err)
-			continue
-		}
-		events[i].FixVersions = versions
-	}
+	e.enrichFixVersions(ctx, events)
 
 	return events, nil
 }
 
-func indexByInstance(obs []db.Observation) map[uuid.UUID]db.Observation {
-	m := make(map[uuid.UUID]db.Observation, len(obs))
+func (e *Engine) enrichFixVersions(ctx context.Context, events []DiffEvent) {
+	for i := range events {
+		versions, err := e.repo.GetFixVersions(ctx, events[i].InstanceID)
+		if err != nil {
+			e.log.ErrorContext(ctx, "get fix versions failed", "instance_id", events[i].InstanceID, "error", err)
+			continue
+		}
+		events[i].FixVersions = versions
+	}
+}
+
+func indexByInstance(obs []domain.Observation) map[uuid.UUID]domain.Observation {
+	m := make(map[uuid.UUID]domain.Observation, len(obs))
 	for _, o := range obs {
 		m[o.InstanceID] = o
 	}
 	return m
 }
 
-func buildEvent(kind DiffKind, scanID, targetID uuid.UUID, targetName string, obs db.Observation, exploits map[string]bool) DiffEvent {
+func buildEvent(kind DiffKind, scanID, targetID uuid.UUID, targetName string, obs domain.Observation, exploits map[string]bool) DiffEvent {
 	return DiffEvent{
 		Kind:           kind,
 		TargetID:       targetID,

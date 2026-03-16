@@ -2,13 +2,12 @@ package scheduler
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"time"
 
 	"github.com/google/uuid"
 
 	"decree/services/oracle/internal/db"
+	"decree/services/oracle/internal/identity"
 )
 
 // LeaseManager manages per-target exclusive job leases.
@@ -19,9 +18,7 @@ type LeaseManager struct {
 
 // NewLeaseManager creates a LeaseManager with a unique holder ID.
 func NewLeaseManager(database *db.DB) *LeaseManager {
-	hostname, _ := os.Hostname()
-	holderID := fmt.Sprintf("oracle-%s-%d", hostname, os.Getpid())
-	return &LeaseManager{db: database, holderID: holderID}
+	return &LeaseManager{db: database, holderID: identity.OracleConsumerID()}
 }
 
 // HolderID returns this lease manager's holder ID.

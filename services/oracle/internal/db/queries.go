@@ -110,7 +110,7 @@ func (d *DB) ClearExpiredLeases(ctx context.Context) error {
 		return err
 	}
 	if tag.RowsAffected() > 0 {
-		slog.Info("cleared expired leases", "count", tag.RowsAffected())
+		slog.InfoContext(ctx, "cleared expired leases", "count", tag.RowsAffected())
 	}
 	return nil
 }

@@ -2,68 +2,90 @@ package scheduler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
 
 	"decree/services/oracle/internal/config"
-	"decree/services/oracle/internal/db"
-	"decree/services/oracle/internal/scanner"
+	"decree/services/oracle/internal/domain"
 )
+
+// SchedulerOption configures the Scheduler.
+type SchedulerOption func(*Scheduler)
+
+// WithSchedulerLogger sets a custom logger for the Scheduler.
+func WithSchedulerLogger(l *slog.Logger) SchedulerOption {
+	return func(s *Scheduler) { s.log = l }
+}
 
 // Scheduler manages periodic scanning of targets.
 type Scheduler struct {
 	cfg     *config.Config
-	db      *db.DB
-	scanner *scanner.Client
+	store   TargetStore
+	scanner ScannerService
 	lease   *LeaseManager
+	log     *slog.Logger
 
 	// nextRun tracks when each target is next due for scanning.
 	mu      sync.Mutex
 	nextRun map[uuid.UUID]time.Time
+
+	// wg tracks background goroutines (poll, enrichment).
+	wg errgroup.Group
 }
 
 // New creates a Scheduler.
-func New(cfg *config.Config, database *db.DB, scannerClient *scanner.Client, leaseMgr *LeaseManager) *Scheduler {
-	return &Scheduler{
+func New(cfg *config.Config, store TargetStore, scannerSvc ScannerService, leaseMgr *LeaseManager, opts ...SchedulerOption) *Scheduler {
+	s := &Scheduler{
 		cfg:     cfg,
-		db:      database,
-		scanner: scannerClient,
+		store:   store,
+		scanner: scannerSvc,
 		lease:   leaseMgr,
+		log:     slog.Default(),
 		nextRun: make(map[uuid.UUID]time.Time),
 	}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 // Run starts the scheduler loop. It blocks until ctx is cancelled.
 func (s *Scheduler) Run(ctx context.Context) error {
-	slog.Info("scheduler starting")
+	s.log.InfoContext(ctx, "scheduler starting")
 
 	// Clean up stale leases from previous instances of this oracle
-	if err := s.db.ClearExpiredLeases(ctx); err != nil {
-		slog.Error("failed to clear expired leases", "error", err)
+	if err := s.store.ClearExpiredLeases(ctx); err != nil {
+		s.log.ErrorContext(ctx, "failed to clear expired leases", "error", err)
 	}
 
 	if err := s.seedTargets(ctx); err != nil {
 		return err
 	}
 
-	targets, err := s.db.ListTargets(ctx)
+	targets, err := s.store.ListTargets(ctx)
 	if err != nil {
 		return err
 	}
 
 	// Initial scan if configured
 	if s.cfg.Scan.InitialScan {
-		slog.Info("running initial scan for all targets", "count", len(targets))
+		s.log.InfoContext(ctx, "running initial scan for all targets", "count", len(targets))
 		for _, t := range targets {
 			s.triggerScan(ctx, t)
 		}
 	}
 
 	// Start enrichment refresh goroutine
-	go s.runEnrichmentRefresh(ctx)
+	s.wg.Go(func() error {
+		s.runEnrichmentRefresh(ctx)
+		return nil
+	})
 
 	// Main tick loop
 	interval := s.cfg.Scan.Interval.Duration
@@ -78,7 +100,8 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Info("scheduler stopping")
+			s.log.InfoContext(ctx, "scheduler stopping, waiting for background goroutines")
+			_ = s.wg.Wait()
 			return nil
 		case <-ticker.C:
 			s.tick(ctx)
@@ -87,9 +110,9 @@ func (s *Scheduler) Run(ctx context.Context) error {
 }
 
 func (s *Scheduler) tick(ctx context.Context) {
-	targets, err := s.db.ListTargets(ctx)
+	targets, err := s.store.ListTargets(ctx)
 	if err != nil {
-		slog.Error("list targets failed", "error", err)
+		s.log.ErrorContext(ctx, "list targets failed", "error", err)
 		return
 	}
 
@@ -107,30 +130,30 @@ func (s *Scheduler) tick(ctx context.Context) {
 	}
 }
 
-func (s *Scheduler) triggerScan(ctx context.Context, target db.Target) {
+func (s *Scheduler) triggerScan(ctx context.Context, target domain.Target) {
 	interval := s.cfg.Scan.Interval.Duration
 	ttl := 2 * interval
 
 	acquired, err := s.lease.Acquire(ctx, target.ID, ttl)
 	if err != nil {
-		slog.Error("lease acquire failed", "target", target.Name, "error", err)
+		s.log.ErrorContext(ctx, "lease acquire failed", "target", target.Name, "error", err)
 		return
 	}
 	if !acquired {
-		slog.Warn("lease held by another, skipping scan", "target", target.Name)
+		s.log.WarnContext(ctx, "lease held by another, skipping scan", "target", target.Name)
 		return
 	}
 
-	slog.Info("triggering scan", "target", target.Name, "target_id", target.ID)
+	s.log.InfoContext(ctx, "triggering scan", "target", target.Name, "target_id", target.ID)
 
 	resp, err := s.scanner.RunScan(ctx, target.ID.String())
 	if err != nil {
-		slog.Error("RunScan failed", "target", target.Name, "error", err)
+		s.log.ErrorContext(ctx, "RunScan failed", "target", target.Name, "error", err)
 		s.lease.Release(ctx, target.ID)
 		return
 	}
 
-	slog.Info("scan started", "target", target.Name, "scan_id", resp.ScanID)
+	s.log.InfoContext(ctx, "scan started", "target", target.Name, "scan_id", resp.ScanID)
 
 	// Track job for lease
 	if jobID, err := uuid.Parse(resp.ScanID); err == nil {
@@ -138,7 +161,10 @@ func (s *Scheduler) triggerScan(ctx context.Context, target db.Target) {
 	}
 
 	// Poll scan status in background
-	go s.pollScanStatus(ctx, target, resp.ScanID)
+	s.wg.Go(func() error {
+		s.pollScanStatus(ctx, target, resp.ScanID)
+		return nil
+	})
 
 	// Set next run time
 	s.mu.Lock()
@@ -146,7 +172,7 @@ func (s *Scheduler) triggerScan(ctx context.Context, target db.Target) {
 	s.mu.Unlock()
 }
 
-func (s *Scheduler) pollScanStatus(ctx context.Context, target db.Target, scanID string) {
+func (s *Scheduler) pollScanStatus(ctx context.Context, target domain.Target, scanID string) {
 	defer s.lease.Release(ctx, target.ID)
 
 	ticker := time.NewTicker(5 * time.Second)
@@ -159,54 +185,60 @@ func (s *Scheduler) pollScanStatus(ctx context.Context, target db.Target, scanID
 		case <-ctx.Done():
 			return
 		case <-timeout:
-			slog.Warn("scan poll timeout", "target", target.Name, "scan_id", scanID)
+			s.log.WarnContext(ctx, "scan poll timeout", "target", target.Name, "scan_id", scanID)
 			return
 		case <-ticker.C:
 			resp, err := s.scanner.GetScanStatus(ctx, scanID)
 			if err != nil {
-				slog.Error("GetScanStatus failed", "scan_id", scanID, "error", err)
+				s.log.ErrorContext(ctx, "GetScanStatus failed", "scan_id", scanID, "error", err)
 				continue
 			}
 
 			switch resp.Status {
 			case "completed":
-				slog.Info("scan completed", "target", target.Name, "scan_id", scanID)
+				s.log.InfoContext(ctx, "scan completed", "target", target.Name, "scan_id", scanID)
 				return
 			case "failed":
-				slog.Error("scan failed", "target", target.Name, "scan_id", scanID,
+				s.log.ErrorContext(ctx, "scan failed", "target", target.Name, "scan_id", scanID,
 					"error", resp.ErrorMessage)
 				return
 			default:
-				slog.Debug("scan in progress", "target", target.Name, "status", resp.Status)
+				s.log.DebugContext(ctx, "scan in progress", "target", target.Name, "status", resp.Status)
 			}
 		}
 	}
 }
 
 func (s *Scheduler) seedTargets(ctx context.Context) error {
-	projectID, err := s.db.EnsureProject(ctx, s.cfg.Project.Name)
+	projectID, err := s.store.EnsureProject(ctx, s.cfg.Project.Name)
 	if err != nil {
 		return err
 	}
 
+	var errs []error
+
 	for _, repo := range s.cfg.Targets.Repositories {
 		sourceRef := repo.URL
 		branch := repo.Branch
-		_, err := s.db.UpsertTarget(ctx, projectID, repo.Name, "repository", &sourceRef, &branch)
+		_, err := s.store.UpsertTarget(ctx, projectID, repo.Name, "repository", &sourceRef, &branch)
 		if err != nil {
-			slog.Error("seed target failed", "name", repo.Name, "error", err)
+			errs = append(errs, err)
 		}
 	}
 
 	for _, ctr := range s.cfg.Targets.Containers {
 		image := ctr.Image
-		_, err := s.db.UpsertTarget(ctx, projectID, ctr.Name, "container", &image, nil)
+		_, err := s.store.UpsertTarget(ctx, projectID, ctr.Name, "container", &image, nil)
 		if err != nil {
-			slog.Error("seed target failed", "name", ctr.Name, "error", err)
+			errs = append(errs, err)
 		}
 	}
 
-	slog.Info("targets seeded", "project", s.cfg.Project.Name)
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("seed targets: %w", err)
+	}
+
+	s.log.InfoContext(ctx, "targets seeded", "project", s.cfg.Project.Name)
 	return nil
 }
 
@@ -233,27 +265,27 @@ func (s *Scheduler) runEnrichmentRefresh(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-epssTicker.C:
-			slog.Info("refreshing EPSS data")
+			s.log.InfoContext(ctx, "refreshing EPSS data")
 			if resp, err := s.scanner.SyncEpss(ctx); err != nil {
-				slog.Error("EPSS sync failed", "error", err)
+				s.log.ErrorContext(ctx, "EPSS sync failed", "error", err)
 			} else {
-				slog.Info("EPSS sync complete", "synced", resp.SyncedCount)
+				s.log.InfoContext(ctx, "EPSS sync complete", "synced", resp.SyncedCount)
 				s.recalculateAfterRefresh(ctx)
 			}
 		case <-nvdTicker.C:
-			slog.Info("refreshing NVD data")
+			s.log.InfoContext(ctx, "refreshing NVD data")
 			if resp, err := s.scanner.SyncNvd(ctx); err != nil {
-				slog.Error("NVD sync failed", "error", err)
+				s.log.ErrorContext(ctx, "NVD sync failed", "error", err)
 			} else {
-				slog.Info("NVD sync complete", "synced", resp.SyncedCount)
+				s.log.InfoContext(ctx, "NVD sync complete", "synced", resp.SyncedCount)
 				s.recalculateAfterRefresh(ctx)
 			}
 		case <-exploitTicker.C:
-			slog.Info("refreshing ExploitDB data")
+			s.log.InfoContext(ctx, "refreshing ExploitDB data")
 			if resp, err := s.scanner.SyncExploitDb(ctx); err != nil {
-				slog.Error("ExploitDB sync failed", "error", err)
+				s.log.ErrorContext(ctx, "ExploitDB sync failed", "error", err)
 			} else {
-				slog.Info("ExploitDB sync complete", "exploits", resp.ExploitsSynced, "links", resp.LinksSynced)
+				s.log.InfoContext(ctx, "ExploitDB sync complete", "exploits", resp.ExploitsSynced, "links", resp.LinksSynced)
 			}
 		}
 	}
@@ -262,8 +294,8 @@ func (s *Scheduler) runEnrichmentRefresh(ctx context.Context) {
 func (s *Scheduler) recalculateAfterRefresh(ctx context.Context) {
 	resp, err := s.scanner.RecalculateScores(ctx, nil)
 	if err != nil {
-		slog.Error("score recalculation failed", "error", err)
+		s.log.ErrorContext(ctx, "score recalculation failed", "error", err)
 		return
 	}
-	slog.Info("scores recalculated", "updated", resp.UpdatedCount)
+	s.log.InfoContext(ctx, "scores recalculated", "updated", resp.UpdatedCount)
 }

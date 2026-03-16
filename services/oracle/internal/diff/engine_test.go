@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"decree/services/oracle/internal/db"
+	"decree/services/oracle/internal/domain"
 )
 
 func TestSeverityOrder(t *testing.T) {
@@ -33,7 +33,7 @@ func TestSeverityOrder(t *testing.T) {
 
 func TestIndexByInstance(t *testing.T) {
 	id1, id2 := uuid.New(), uuid.New()
-	obs := []db.Observation{
+	obs := []domain.Observation{
 		{InstanceID: id1, AdvisoryID: "CVE-2024-001"},
 		{InstanceID: id2, AdvisoryID: "CVE-2024-002"},
 	}
@@ -55,7 +55,7 @@ func TestBuildEvent(t *testing.T) {
 	targetID := uuid.New()
 	score := float32(8.5)
 
-	obs := db.Observation{
+	obs := domain.Observation{
 		InstanceID:     uuid.New(),
 		PackageName:    "lodash",
 		PackageVersion: "4.17.20",
@@ -86,12 +86,12 @@ func TestBuildEvent(t *testing.T) {
 // Golden test fixtures
 
 type GoldenTestCase struct {
-	Name      string            `json:"name"`
-	Current   []GoldenObs       `json:"current"`
-	Previous  []GoldenObs       `json:"previous"`
-	Exploits  map[string]bool   `json:"exploits"`
-	PrevExpl  map[string]bool   `json:"prev_exploits"`
-	Expected  []GoldenExpected  `json:"expected"`
+	Name     string           `json:"name"`
+	Current  []GoldenObs      `json:"current"`
+	Previous []GoldenObs      `json:"previous"`
+	Exploits map[string]bool  `json:"exploits"`
+	PrevExpl map[string]bool  `json:"prev_exploits"`
+	Expected []GoldenExpected `json:"expected"`
 }
 
 type GoldenObs struct {
@@ -192,10 +192,10 @@ func TestDiffDetection_Golden(t *testing.T) {
 	}
 }
 
-func toObservations(gobs []GoldenObs) []db.Observation {
-	obs := make([]db.Observation, len(gobs))
+func toObservations(gobs []GoldenObs) []domain.Observation {
+	obs := make([]domain.Observation, len(gobs))
 	for i, g := range gobs {
-		obs[i] = db.Observation{
+		obs[i] = domain.Observation{
 			InstanceID:     uuid.MustParse(g.InstanceID),
 			PackageName:    g.Package,
 			PackageVersion: g.Version,

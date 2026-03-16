@@ -50,24 +50,24 @@ func TestRouter_SeverityFilter(t *testing.T) {
 	score := float32(5.0)
 	events := []diff.DiffEvent{
 		{
-			Kind:       diff.DiffNewCVE,
-			TargetID:   uuid.New(),
-			AdvisoryID: "CVE-LOW",
-			Severity:   "medium",
+			Kind:        diff.DiffNewCVE,
+			TargetID:    uuid.New(),
+			AdvisoryID:  "CVE-LOW",
+			Severity:    "medium",
 			DecreeScore: &score,
 		},
 		{
-			Kind:       diff.DiffNewCVE,
-			TargetID:   uuid.New(),
-			AdvisoryID: "CVE-HIGH",
-			Severity:   "high",
+			Kind:        diff.DiffNewCVE,
+			TargetID:    uuid.New(),
+			AdvisoryID:  "CVE-HIGH",
+			Severity:    "high",
 			DecreeScore: &score,
 		},
 		{
-			Kind:       diff.DiffNewCVE,
-			TargetID:   uuid.New(),
-			AdvisoryID: "CVE-CRIT",
-			Severity:   "critical",
+			Kind:        diff.DiffNewCVE,
+			TargetID:    uuid.New(),
+			AdvisoryID:  "CVE-CRIT",
+			Severity:    "critical",
 			DecreeScore: &score,
 		},
 	}

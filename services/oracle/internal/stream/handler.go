@@ -8,9 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
-
-	"decree/services/oracle/internal/diff"
-	"decree/services/oracle/internal/notify"
 )
 
 // ScanEvent represents a scan-events stream message payload.
@@ -22,18 +19,32 @@ type ScanEvent struct {
 	Error         string `json:"error,omitempty"`
 }
 
+// EventRouterOption configures the EventRouter.
+type EventRouterOption func(*EventRouter)
+
+// WithEventRouterLogger sets a custom logger for the EventRouter.
+func WithEventRouterLogger(l *slog.Logger) EventRouterOption {
+	return func(r *EventRouter) { r.log = l }
+}
+
 // EventRouter dispatches stream events to the diff engine and notification router.
 type EventRouter struct {
-	diffEngine *diff.Engine
-	notifier   *notify.Router
+	detector DiffDetector
+	notifier Notifier
+	log      *slog.Logger
 }
 
 // NewEventRouter creates an EventRouter.
-func NewEventRouter(diffEngine *diff.Engine, notifier *notify.Router) *EventRouter {
-	return &EventRouter{
-		diffEngine: diffEngine,
-		notifier:   notifier,
+func NewEventRouter(detector DiffDetector, notifier Notifier, opts ...EventRouterOption) *EventRouter {
+	r := &EventRouter{
+		detector: detector,
+		notifier: notifier,
+		log:      slog.Default(),
 	}
+	for _, o := range opts {
+		o(r)
+	}
+	return r
 }
 
 // Handle processes a single stream message.
@@ -48,7 +59,7 @@ func (r *EventRouter) Handle(ctx context.Context, stream string, msg redis.XMess
 	case "scan-events":
 		return r.handleScanEvent(ctx, payloadStr)
 	default:
-		slog.Debug("ignoring message from unknown stream", "stream", stream, "id", msg.ID)
+		r.log.DebugContext(ctx, "ignoring message from unknown stream", "stream", stream, "id", msg.ID)
 		return nil
 	}
 }
@@ -63,10 +74,10 @@ func (r *EventRouter) handleScanEvent(ctx context.Context, payload string) error
 	case "scan.completed":
 		return r.handleScanCompleted(ctx, evt)
 	case "scan.failed":
-		slog.Warn("scan failed", "scan_id", evt.ScanID, "target_id", evt.TargetID, "error", evt.Error)
+		r.log.WarnContext(ctx, "scan failed", "scan_id", evt.ScanID, "target_id", evt.TargetID, "error", evt.Error)
 		return nil
 	default:
-		slog.Debug("ignoring unknown scan event type", "type", evt.Type)
+		r.log.DebugContext(ctx, "ignoring unknown scan event type", "type", evt.Type)
 		return nil
 	}
 }
@@ -81,20 +92,20 @@ func (r *EventRouter) handleScanCompleted(ctx context.Context, evt ScanEvent) er
 		return fmt.Errorf("parse target_id: %w", err)
 	}
 
-	slog.Info("processing scan completion", "scan_id", scanID, "target_id", targetID,
+	r.log.InfoContext(ctx, "processing scan completion", "scan_id", scanID, "target_id", targetID,
 		"findings", evt.FindingsCount)
 
-	events, err := r.diffEngine.Detect(ctx, scanID, targetID)
+	events, err := r.detector.Detect(ctx, scanID, targetID)
 	if err != nil {
 		return fmt.Errorf("diff detection: %w", err)
 	}
 
 	if len(events) == 0 {
-		slog.Info("no diff events detected", "scan_id", scanID)
+		r.log.InfoContext(ctx, "no diff events detected", "scan_id", scanID)
 		return nil
 	}
 
-	slog.Info("diff events detected", "scan_id", scanID, "count", len(events))
+	r.log.InfoContext(ctx, "diff events detected", "scan_id", scanID, "count", len(events))
 
 	// Send notifications for diff events
 	r.notifier.Notify(ctx, events)

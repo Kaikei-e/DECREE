@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,20 +12,34 @@ import (
 	"time"
 )
 
+// ClientOption configures the Client.
+type ClientOption func(*Client)
+
+// WithClientLogger sets a custom logger for the Client.
+func WithClientLogger(l *slog.Logger) ClientOption {
+	return func(c *Client) { c.log = l }
+}
+
 // Client calls the scanner Connect-RPC endpoints.
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
+	log        *slog.Logger
 }
 
 // NewClient creates a scanner client pointing at the given base URL.
-func NewClient(baseURL string) *Client {
-	return &Client{
+func NewClient(baseURL string, opts ...ClientOption) *Client {
+	c := &Client{
 		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Minute,
 		},
+		log: slog.Default(),
 	}
+	for _, o := range opts {
+		o(c)
+	}
+	return c
 }
 
 // RunScan triggers a scan for the given target.
@@ -106,7 +121,7 @@ func (c *Client) call(ctx context.Context, path string, reqBody, respBody any, t
 		}
 
 		if attempt < len(backoffs) {
-			slog.Warn("scanner call failed, retrying",
+			c.log.WarnContext(ctx, "scanner call failed, retrying",
 				"path", path, "attempt", attempt+1, "error", err)
 			select {
 			case <-ctx.Done():
@@ -159,8 +174,8 @@ func (c *Client) doCall(ctx context.Context, path string, reqBody, respBody any,
 }
 
 func isRetryable(err error) bool {
-	ce, ok := err.(*ConnectError)
-	if !ok {
+	var ce *ConnectError
+	if !errors.As(err, &ce) {
 		return true // network errors are retryable
 	}
 	return ce.Code == "unavailable" || ce.Code == "deadline_exceeded"
