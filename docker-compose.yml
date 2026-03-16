@@ -139,7 +139,7 @@ services:
     ports:
       - "3400:3400"
     environment:
-      VITE_GATEWAY_URL: http://localhost:8400
+      PUBLIC_GATEWAY_URL: http://localhost:8400
     depends_on:
       decree-gateway:
         condition: service_healthy
