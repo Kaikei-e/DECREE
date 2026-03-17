@@ -32,8 +32,9 @@ describe('DetailPanel', () => {
 			props: { finding, onClose: () => {} },
 		});
 
-		expect(getByText('Detection Evidence')).toBeTruthy();
 		expect(getByText('OSV published the advisory before downstream UI caught up.')).toBeTruthy();
+		expect(getByText('Source:')).toBeTruthy();
+		expect(getByText('osv')).toBeTruthy();
 		expect(getByText('GHSA-xxxx-yyyy-zzzz')).toBeTruthy();
 		expect(
 			getByText(

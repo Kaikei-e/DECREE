@@ -52,6 +52,37 @@ function rangeStatusCopy(status?: string): string {
 				<div class="mt-1 text-xs text-hud-text-muted">{finding.ecosystem} • {finding.target_name}</div>
 			</div>
 
+			{#if finding.detection_evidence?.summary}
+				<div class="rounded-sm border border-hud-border bg-hud-surface/70 px-3 py-2 text-sm leading-6 text-hud-text">
+					{finding.detection_evidence.summary}
+				</div>
+			{/if}
+
+			{#if finding.detection_evidence}
+				<div class="rounded-sm border border-hud-border bg-hud-surface/40 px-3 py-2 text-xs text-hud-text-secondary">
+					<div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+						<div>
+							<span class="text-hud-text-muted">Source:</span>
+							<span class="ml-1 font-mono text-hud-text">{finding.detection_evidence.source}</span>
+						</div>
+						{#if finding.detection_evidence.fetched_at}
+							<div>
+								<span class="text-hud-text-muted">Fetched:</span>
+								<span class="ml-1 text-hud-text">{new Date(finding.detection_evidence.fetched_at).toLocaleString()}</span>
+							</div>
+						{/if}
+					</div>
+					<div class="mt-2 text-hud-text">{rangeStatusCopy(finding.detection_evidence.range_evaluation_status)}</div>
+					{#if finding.detection_evidence.aliases.length > 0}
+						<div class="mt-2 flex flex-wrap gap-1">
+							{#each finding.detection_evidence.aliases as alias}
+								<span class="rounded-sm border border-hud-border bg-hud-void px-2 py-0.5 font-mono text-[11px] text-hud-text-muted">{alias}</span>
+							{/each}
+						</div>
+					{/if}
+				</div>
+			{/if}
+
 			{#if finding.decree_score != null}
 				<ScoreBreakdown
 					cvss={finding.cvss_score ?? 0}
@@ -117,35 +148,6 @@ function rangeStatusCopy(status?: string): string {
 				<div class="text-xs">
 					<span class="text-hud-text-muted">CVSS Vector:</span>
 					<span class="font-mono text-hud-text-secondary">{finding.cvss_vector}</span>
-				</div>
-			{/if}
-
-			{#if finding.detection_evidence}
-				<div>
-					<h3 class="hud-header">Detection Evidence</h3>
-					<div class="mt-1 space-y-1 text-xs text-hud-text-secondary">
-						<div>
-							<span class="text-hud-text-muted">Source:</span>
-							<span class="ml-1 font-mono text-hud-text">{finding.detection_evidence.source}</span>
-						</div>
-						{#if finding.detection_evidence.fetched_at}
-							<div>
-								<span class="text-hud-text-muted">Fetched:</span>
-								<span class="ml-1 text-hud-text">{new Date(finding.detection_evidence.fetched_at).toLocaleString()}</span>
-							</div>
-						{/if}
-						<div>{rangeStatusCopy(finding.detection_evidence.range_evaluation_status)}</div>
-						{#if finding.detection_evidence.summary}
-							<div class="text-hud-text">{finding.detection_evidence.summary}</div>
-						{/if}
-						{#if finding.detection_evidence.aliases.length > 0}
-							<div class="flex flex-wrap gap-1 pt-1">
-								{#each finding.detection_evidence.aliases as alias}
-									<span class="rounded-sm border border-hud-border bg-hud-surface px-2 py-0.5 font-mono text-[11px] text-hud-text-muted">{alias}</span>
-								{/each}
-							</div>
-						{/if}
-					</div>
 				</div>
 			{/if}
 		</div>
