@@ -7,11 +7,18 @@ import CameraToolbar from './CameraToolbar.svelte';
 interface Props {
 	graphModel: GraphModel;
 	rendererType: RendererChoice;
+	selectedNodeId?: string | null;
 	onNodeClick: (nodeId: string) => void;
 	onNodeHover: (nodeId: string | null, position?: { x: number; y: number }) => void;
 }
 
-const { graphModel, rendererType, onNodeClick, onNodeHover }: Props = $props();
+const {
+	graphModel,
+	rendererType,
+	selectedNodeId = null,
+	onNodeClick,
+	onNodeHover,
+}: Props = $props();
 
 let containerEl: HTMLElement | undefined = $state();
 let renderer: SceneRenderer | null = $state(null);
@@ -60,6 +67,10 @@ $effect(() => {
 	const observer = new ResizeObserver(() => renderer?.resize());
 	observer.observe(containerEl);
 	return () => observer.disconnect();
+});
+
+$effect(() => {
+	renderer?.setSelectedNode(selectedNodeId ?? null);
 });
 
 function handleKeydown(e: KeyboardEvent) {

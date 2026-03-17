@@ -107,6 +107,8 @@ export class Canvas2DRenderer implements SceneRenderer {
 		this.draw();
 	}
 
+	setSelectedNode(_nodeId: string | null): void {}
+
 	onNodeClick(callback: (nodeId: string) => void) {
 		this.clickCallback = callback;
 	}

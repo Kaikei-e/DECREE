@@ -10,7 +10,14 @@ import {
 	overviewPreset,
 	topDownPreset,
 } from './camera-presets';
-import { createEdgeMaterial, createNodeMaterial } from './node-material';
+import {
+	createEdgeMaterial,
+	createGlowMaterial,
+	createNodeMaterial,
+	GLOW_MAX_INTENSITY,
+	GLOW_MIN_INTENSITY,
+	GLOW_PERIOD,
+} from './node-material';
 import { NodeRaycaster } from './raycaster';
 
 const NODE_GEOMETRY = new THREE.CylinderGeometry(0.16, 0.26, 1, 6, 1, false);
@@ -36,6 +43,9 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	private districtGroup: THREE.Group | null = null;
 	private nodeIds: string[] = [];
 	private graph: GraphModel | null = null;
+
+	private glowMesh: THREE.Mesh | null = null;
+	private glowMaterial: THREE.MeshStandardMaterial | null = null;
 
 	private clickCallback: ((nodeId: string) => void) | null = null;
 	private hoverCallback:
@@ -86,7 +96,14 @@ export class ThreeSceneRenderer implements SceneRenderer {
 		this.container?.removeEventListener('pointermove', this.handlePointerMove);
 		this.container?.removeEventListener('click', this.handleClick);
 
-		// 4. Three.js resources
+		// 4. Three.js resources (glow overlay)
+		if (this.glowMesh) {
+			this.scene.remove(this.glowMesh);
+			this.glowMesh = null;
+		}
+		this.glowMaterial?.dispose();
+		this.glowMaterial = null;
+
 		this.controls?.dispose();
 
 		if (this.instancedMesh) {
@@ -248,6 +265,50 @@ export class ThreeSceneRenderer implements SceneRenderer {
 		this.renderer.setSize(w, h);
 	}
 
+	setSelectedNode(nodeId: string | null): void {
+		// Remove existing glow overlay
+		if (this.glowMesh) {
+			this.scene.remove(this.glowMesh);
+			this.glowMesh = null;
+		}
+
+		if (!nodeId || !this.instancedMesh) {
+			this.glowMaterial?.dispose();
+			this.glowMaterial = null;
+			return;
+		}
+
+		const idx = this.nodeIds.indexOf(nodeId);
+		if (idx === -1) {
+			this.glowMaterial?.dispose();
+			this.glowMaterial = null;
+			return;
+		}
+
+		const matrix = new THREE.Matrix4();
+		this.instancedMesh.getMatrixAt(idx, matrix);
+
+		if (!this.glowMaterial) {
+			this.glowMaterial = createGlowMaterial();
+		}
+
+		const mesh = new THREE.Mesh(NODE_GEOMETRY, this.glowMaterial);
+		mesh.applyMatrix4(matrix);
+		mesh.scale.multiplyScalar(1.03);
+		mesh.name = 'glow-overlay';
+		this.scene.add(mesh);
+		this.glowMesh = mesh;
+	}
+
+	updateGlow(): void {
+		if (!this.glowMesh || !this.glowMaterial) return;
+		const elapsed = this.timer.getElapsed();
+		const t = (elapsed % GLOW_PERIOD) / GLOW_PERIOD;
+		const sine = (Math.sin(t * Math.PI * 2 - Math.PI / 2) + 1) / 2;
+		this.glowMaterial.emissiveIntensity =
+			GLOW_MIN_INTENSITY + sine * (GLOW_MAX_INTENSITY - GLOW_MIN_INTENSITY);
+	}
+
 	private setupLights() {
 		const ambient = new THREE.AmbientLight(0xffffff, 0.48);
 		this.scene.add(ambient);
@@ -289,6 +350,9 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	}
 
 	private rebuildScene(model: GraphModel) {
+		// Clear glow overlay from previous selection
+		this.setSelectedNode(null);
+
 		// Remove old meshes
 		if (this.instancedMesh) {
 			this.scene.remove(this.instancedMesh);
@@ -463,6 +527,7 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	private animate() {
 		this.animationId = requestAnimationFrame((timestamp) => {
 			this.timer.update(timestamp);
+			this.updateGlow();
 
 			this.controls.update();
 			this.renderer.render(this.scene, this.camera);

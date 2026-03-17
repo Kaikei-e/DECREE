@@ -78,6 +78,7 @@ const maxDate = $derived(new Date().toISOString());
 					<SceneGuide summary={sceneSummary} rendererType={appState.rendererType} />
 
 					<div class="relative min-h-[30rem] flex-1 overflow-hidden hud-panel hud-scanlines bg-hud-void/96">
+						{#if appState.rendererType === '3d'}
 						<div class="absolute left-4 top-4 z-10 max-w-xs rounded-sm border border-hud-border bg-hud-base/76 px-3 py-2 backdrop-blur">
 							<p class="hud-header">Threat Skyline</p>
 							<p class="mt-1 text-xs leading-5 text-hud-text-secondary">
@@ -85,7 +86,16 @@ const maxDate = $derived(new Date().toISOString());
 								risk neighborhoods before drilling into a column.
 							</p>
 						</div>
+						{:else}
+						<div class="absolute left-4 top-4 z-10 max-w-xs rounded-sm border border-hud-border bg-hud-base/76 px-3 py-2 backdrop-blur">
+							<p class="hud-header">Dependency Graph</p>
+							<p class="mt-1 text-xs leading-5 text-hud-text-secondary">
+								Nodes are sized by connection count. Click a node to inspect its details.
+							</p>
+						</div>
+						{/if}
 
+						{#if appState.rendererType === '3d'}
 						<div class="absolute bottom-4 left-4 z-10 rounded-sm border border-hud-border bg-hud-base/72 px-3 py-2 backdrop-blur">
 							<p class="hud-header">Read Order</p>
 							<p class="mt-1 text-[11px] uppercase tracking-[0.14em] text-hud-text-secondary">
@@ -95,7 +105,19 @@ const maxDate = $derived(new Date().toISOString());
 								Low to high = DECREE skyline
 							</p>
 						</div>
+						{:else}
+						<div class="absolute bottom-4 left-4 z-10 rounded-sm border border-hud-border bg-hud-base/72 px-3 py-2 backdrop-blur">
+							<p class="hud-header">Read Order</p>
+							<p class="mt-1 text-[11px] uppercase tracking-[0.14em] text-hud-text-secondary">
+								Position = graph layout
+							</p>
+							<p class="mt-1 text-[11px] uppercase tracking-[0.14em] text-hud-text-secondary">
+								Size = connection count
+							</p>
+						</div>
+						{/if}
 
+						{#if appState.rendererType === '3d'}
 						<div class="absolute inset-y-20 left-4 z-10 hidden w-10 items-center justify-center md:flex">
 							<div class="flex h-full flex-col items-center justify-between rounded-full border border-hud-border bg-hud-base/58 px-2 py-3 backdrop-blur">
 								<span class="font-mono text-[10px] uppercase tracking-[0.16em] text-hud-text-secondary [writing-mode:vertical-rl] [text-orientation:mixed]">
@@ -107,16 +129,24 @@ const maxDate = $derived(new Date().toISOString());
 								</span>
 							</div>
 						</div>
+						{/if}
 
 						<div class="absolute bottom-4 right-4 z-10 flex flex-wrap justify-end gap-2 text-[11px] uppercase tracking-[0.14em] text-hud-text-secondary">
+							{#if appState.rendererType === '3d'}
 							<span class="rounded-sm border border-hud-border bg-hud-base/72 px-2 py-1 backdrop-blur">Column = instance</span>
 							<span class="rounded-sm border border-hud-border bg-hud-base/72 px-2 py-1 backdrop-blur">Color = severity</span>
 							<span class="rounded-sm border border-hud-border bg-hud-base/72 px-2 py-1 backdrop-blur">Glow = EPSS</span>
+							{:else}
+							<span class="rounded-sm border border-hud-border bg-hud-base/72 px-2 py-1 backdrop-blur">Node = instance</span>
+							<span class="rounded-sm border border-hud-border bg-hud-base/72 px-2 py-1 backdrop-blur">Color = severity</span>
+							<span class="rounded-sm border border-hud-border bg-hud-base/72 px-2 py-1 backdrop-blur">Size = connections</span>
+							{/if}
 						</div>
 
 						<VisualizationCanvas
 							graphModel={appState.graphModel}
 							rendererType={appState.rendererType}
+							selectedNodeId={appState.selectedNodeId}
 							{onNodeClick}
 							{onNodeHover}
 						/>

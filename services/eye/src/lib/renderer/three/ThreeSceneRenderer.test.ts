@@ -1,3 +1,4 @@
+import type * as THREE from 'three';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GraphModel } from '$lib/graph/model';
 
@@ -69,6 +70,15 @@ vi.mock('./camera-presets', () => ({
 vi.mock('./node-material', () => ({
 	createNodeMaterial: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 	createEdgeMaterial: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+	createGlowMaterial: vi.fn().mockReturnValue({
+		dispose: vi.fn(),
+		emissiveIntensity: 0.15,
+		emissive: { set: vi.fn() },
+	}),
+	GLOW_COLOR: 0xffaa44,
+	GLOW_PERIOD: 3.5,
+	GLOW_MIN_INTENSITY: 0.15,
+	GLOW_MAX_INTENSITY: 0.7,
 }));
 
 vi.mock('./raycaster', () => ({
@@ -269,6 +279,116 @@ describe('ThreeSceneRenderer', () => {
 		expect(districtGroup?.children.length).toBeGreaterThan(0);
 
 		renderer.dispose();
+	});
+
+	describe('glow overlay (selection feedback)', () => {
+		type GlowInternals = {
+			glowMesh: THREE.Mesh | null;
+			glowMaterial: THREE.MeshStandardMaterial | null;
+			scene: THREE.Scene;
+		};
+
+		it('creates glow overlay mesh when setSelectedNode is called with a valid node', () => {
+			renderer.mount(container);
+			renderer.setGraphModel(sampleGraph);
+			renderer.setSelectedNode('node-1');
+
+			const internals = renderer as unknown as GlowInternals;
+			expect(internals.glowMesh).toBeTruthy();
+			expect(internals.glowMesh?.name).toBe('glow-overlay');
+			expect(internals.scene.getObjectByName('glow-overlay')).toBeTruthy();
+
+			renderer.dispose();
+		});
+
+		it('removes glow overlay when setSelectedNode(null) is called', () => {
+			renderer.mount(container);
+			renderer.setGraphModel(sampleGraph);
+			renderer.setSelectedNode('node-1');
+			renderer.setSelectedNode(null);
+
+			const internals = renderer as unknown as GlowInternals;
+			expect(internals.glowMesh).toBeNull();
+			expect(internals.scene.getObjectByName('glow-overlay')).toBeUndefined();
+
+			renderer.dispose();
+		});
+
+		it('replaces the existing glow overlay when selecting a different node', () => {
+			renderer.mount(container);
+			renderer.setGraphModel(sampleGraph);
+			renderer.setSelectedNode('node-1');
+			renderer.setSelectedNode('node-2');
+
+			const internals = renderer as unknown as GlowInternals;
+			expect(internals.glowMesh).toBeTruthy();
+			// Only one glow overlay should exist
+			const overlays = internals.scene.children.filter((c) => c.name === 'glow-overlay');
+			expect(overlays).toHaveLength(1);
+
+			renderer.dispose();
+		});
+
+		it('uses warm emissive color from createGlowMaterial', async () => {
+			const { createGlowMaterial } = await import('./node-material');
+			renderer.mount(container);
+			renderer.setGraphModel(sampleGraph);
+			renderer.setSelectedNode('node-1');
+
+			expect(createGlowMaterial).toHaveBeenCalled();
+
+			renderer.dispose();
+		});
+
+		it('modulates emissiveIntensity sinusoidally over time', () => {
+			renderer.mount(container);
+			renderer.setGraphModel(sampleGraph);
+			renderer.setSelectedNode('node-1');
+
+			const internals = renderer as unknown as GlowInternals;
+			const material = internals.glowMaterial as THREE.MeshStandardMaterial;
+
+			// Simulate time at half period (peak of sine: sin(π - π/2) = sin(π/2) = 1)
+			mockTimerGetElapsed.mockReturnValue(3.5 / 2); // GLOW_PERIOD / 2
+			(renderer as unknown as { updateGlow(): void }).updateGlow();
+
+			// At t=period/2 → sine peak → should be near max intensity
+			expect(material.emissiveIntensity).toBeCloseTo(0.7, 1);
+
+			// Simulate time at 0 (trough of sine: sin(-π/2) = -1 → mapped to 0)
+			mockTimerGetElapsed.mockReturnValue(0);
+			(renderer as unknown as { updateGlow(): void }).updateGlow();
+
+			// At t=0 → sine trough → should be near min intensity
+			expect(material.emissiveIntensity).toBeCloseTo(0.15, 1);
+
+			renderer.dispose();
+		});
+
+		it('does nothing when setSelectedNode is called with an unknown node id', () => {
+			renderer.mount(container);
+			renderer.setGraphModel(sampleGraph);
+			renderer.setSelectedNode('nonexistent');
+
+			const internals = renderer as unknown as GlowInternals;
+			expect(internals.glowMesh).toBeNull();
+
+			renderer.dispose();
+		});
+
+		it('clears glow overlay when rebuildScene is called', () => {
+			renderer.mount(container);
+			renderer.setGraphModel(sampleGraph);
+			renderer.setSelectedNode('node-1');
+
+			// Rebuild scene via setGraphModel
+			renderer.setGraphModel(sampleGraph);
+
+			const internals = renderer as unknown as GlowInternals;
+			expect(internals.glowMesh).toBeNull();
+
+			renderer.dispose();
+		});
 	});
 
 	it('positions the initial camera in an elevated overview instead of inside the columns', async () => {

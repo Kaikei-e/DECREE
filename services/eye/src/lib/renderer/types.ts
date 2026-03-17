@@ -12,6 +12,7 @@ export interface SceneRenderer {
 	setViewPreset(preset: 'top' | 'front'): void;
 	onNodeClick(callback: (nodeId: string) => void): void;
 	onNodeHover(callback: (nodeId: string | null, position?: { x: number; y: number }) => void): void;
+	setSelectedNode(nodeId: string | null): void;
 	resize(): void;
 }
 
