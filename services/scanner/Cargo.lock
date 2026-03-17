@@ -372,6 +372,7 @@ dependencies = [
  "prost-build",
  "redis",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "sha2",
