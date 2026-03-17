@@ -12,6 +12,8 @@ use crate::enrichment::score;
 use crate::error::{Result, ScannerError};
 use crate::osv::client::{OsvClient, advisory_source};
 use crate::osv::types::OsvBatchResult;
+use crate::osv::types::OsvVulnerability;
+use crate::osv::version::{RangeEvaluationStatus, classify_version_match};
 
 pub struct ScanPipeline {
     pool: PgPool,
@@ -114,6 +116,27 @@ impl ScanPipeline {
                 let cvss = vuln.extract_cvss_score();
                 let cvss_vector = vuln.extract_cvss_vector().map(|s| s.to_string());
                 let fix_versions = vuln.extract_fix_versions();
+                let range_status = classify_version_match(
+                    &pkg.name,
+                    &pkg.version,
+                    pkg.ecosystem.as_osv_str(),
+                    &vuln.affected,
+                );
+
+                if matches!(range_status, RangeEvaluationStatus::ContradictsMatch) {
+                    warn!(
+                        vuln_id = %vuln.id,
+                        advisory_id,
+                        package = %pkg.name,
+                        version = %pkg.version,
+                        ecosystem = %pkg.ecosystem.as_osv_str(),
+                        "OSV advisory range contradicts the matched package version; keeping finding and recording evidence"
+                    );
+                }
+
+                persist_osv_advisory_snapshot(&mut tx, advisory_id, vuln)
+                    .await
+                    .map_err(ScannerError::Database)?;
 
                 let epss_row = queries::get_latest_epss(&mut *tx, advisory_id)
                     .await
@@ -266,6 +289,31 @@ fn collect_cve_ids(osv_results: &[OsvBatchResult]) -> Vec<String> {
     cves.into_iter().collect()
 }
 
+async fn persist_osv_advisory_snapshot(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    advisory_id: &str,
+    vuln: &OsvVulnerability,
+) -> sqlx::Result<()> {
+    let raw_json = serde_json::to_value(vuln).unwrap_or_default();
+    queries::upsert_advisory(&mut **tx, advisory_id, "osv", &raw_json).await?;
+
+    let mut aliases = BTreeSet::new();
+    if vuln.id != advisory_id {
+        aliases.insert(vuln.id.as_str());
+    }
+    for alias in &vuln.aliases {
+        if alias != advisory_id {
+            aliases.insert(alias.as_str());
+        }
+    }
+
+    for alias in aliases {
+        queries::insert_advisory_alias(&mut **tx, advisory_id, alias).await?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::collect_cve_ids;
@@ -277,6 +325,8 @@ mod tests {
             id: id.to_string(),
             aliases: aliases.iter().map(|s| s.to_string()).collect(),
             summary: None,
+            published: None,
+            modified: None,
             severity: vec![],
             affected: vec![],
         }

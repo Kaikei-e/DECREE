@@ -34,39 +34,41 @@ pub struct OsvBatchResult {
     pub vulns: Vec<OsvVulnerability>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OsvVulnerability {
     pub id: String,
     #[serde(default)]
     pub aliases: Vec<String>,
     pub summary: Option<String>,
+    pub published: Option<String>,
+    pub modified: Option<String>,
     #[serde(default)]
     pub severity: Vec<OsvSeverity>,
     #[serde(default)]
     pub affected: Vec<OsvAffected>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OsvSeverity {
     #[serde(rename = "type")]
     pub severity_type: String,
     pub score: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OsvAffected {
     pub package: Option<OsvAffectedPackage>,
     #[serde(default)]
     pub ranges: Vec<OsvRange>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OsvAffectedPackage {
     pub ecosystem: Option<String>,
     pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OsvRange {
     #[serde(rename = "type")]
     pub range_type: String,
@@ -74,10 +76,11 @@ pub struct OsvRange {
     pub events: Vec<OsvEvent>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OsvEvent {
     pub introduced: Option<String>,
     pub fixed: Option<String>,
+    #[serde(default)]
     pub last_known_affected: Option<String>,
 }
 
@@ -163,6 +166,8 @@ mod tests {
             id: "TEST-001".to_string(),
             aliases: vec![],
             summary: None,
+            published: None,
+            modified: None,
             severity: vec![OsvSeverity {
                 severity_type: severity_type.to_string(),
                 score: score.to_string(),
@@ -203,6 +208,8 @@ mod tests {
             id: "TEST-002".to_string(),
             aliases: vec![],
             summary: None,
+            published: None,
+            modified: None,
             severity: vec![],
             affected: vec![],
         };
@@ -261,6 +268,8 @@ mod tests {
             id: "TEST-003".to_string(),
             aliases: vec![],
             summary: None,
+            published: None,
+            modified: None,
             severity: vec![
                 OsvSeverity {
                     severity_type: "CVSS_V4".to_string(),
@@ -287,6 +296,8 @@ mod tests {
             id: "TEST-004".to_string(),
             aliases: vec![],
             summary: None,
+            published: None,
+            modified: None,
             severity: vec![],
             affected: vec![
                 OsvAffected {
@@ -297,10 +308,12 @@ mod tests {
                             OsvEvent {
                                 introduced: Some("0".to_string()),
                                 fixed: Some("7.9.4".to_string()),
+                                last_known_affected: None,
                             },
                             OsvEvent {
                                 introduced: None,
                                 fixed: Some("2.17.2".to_string()),
+                                last_known_affected: None,
                             },
                         ],
                     }],
@@ -313,10 +326,12 @@ mod tests {
                             OsvEvent {
                                 introduced: Some("0".to_string()),
                                 fixed: Some("7.9.4".to_string()),
+                                last_known_affected: None,
                             },
                             OsvEvent {
                                 introduced: None,
                                 fixed: Some("2.17.2".to_string()),
+                                last_known_affected: None,
                             },
                         ],
                     }],

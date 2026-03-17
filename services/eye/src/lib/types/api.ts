@@ -36,6 +36,7 @@ export interface Finding {
 
 export interface FindingDetail extends Finding {
 	advisory_source: string;
+	detection_evidence?: DetectionEvidence;
 	cvss_vector?: string;
 	reachability?: number;
 	is_direct_dep?: boolean;
@@ -44,6 +45,14 @@ export interface FindingDetail extends Finding {
 	fix_versions: string[];
 	exploits: ExploitRef[];
 	dependency_path: DependencyEdge[];
+}
+
+export interface DetectionEvidence {
+	source: string;
+	fetched_at?: string;
+	summary?: string;
+	aliases: string[];
+	range_evaluation_status: 'supports_match' | 'contradicts_match' | 'inconclusive';
 }
 
 export interface ExploitRef {

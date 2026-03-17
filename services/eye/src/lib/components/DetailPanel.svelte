@@ -15,6 +15,17 @@ const { finding, onClose }: Props = $props();
 function formatPurl(purl: string): string {
 	return decodeURIComponent(purl.replace(/^pkg:[^/]+\//, '').replace(/\?.*$/, ''));
 }
+
+function rangeStatusCopy(status?: string): string {
+	switch (status) {
+		case 'supports_match':
+			return 'OSV affected range supports this match.';
+		case 'contradicts_match':
+			return 'OSV range metadata disagrees with this version, but DECREE keeps the finding because source lag or metadata drift is possible.';
+		default:
+			return 'DECREE could not conclusively evaluate the advisory range metadata for this package version.';
+	}
+}
 </script>
 
 {#if finding}
@@ -106,6 +117,35 @@ function formatPurl(purl: string): string {
 				<div class="text-xs">
 					<span class="text-hud-text-muted">CVSS Vector:</span>
 					<span class="font-mono text-hud-text-secondary">{finding.cvss_vector}</span>
+				</div>
+			{/if}
+
+			{#if finding.detection_evidence}
+				<div>
+					<h3 class="hud-header">Detection Evidence</h3>
+					<div class="mt-1 space-y-1 text-xs text-hud-text-secondary">
+						<div>
+							<span class="text-hud-text-muted">Source:</span>
+							<span class="ml-1 font-mono text-hud-text">{finding.detection_evidence.source}</span>
+						</div>
+						{#if finding.detection_evidence.fetched_at}
+							<div>
+								<span class="text-hud-text-muted">Fetched:</span>
+								<span class="ml-1 text-hud-text">{new Date(finding.detection_evidence.fetched_at).toLocaleString()}</span>
+							</div>
+						{/if}
+						<div>{rangeStatusCopy(finding.detection_evidence.range_evaluation_status)}</div>
+						{#if finding.detection_evidence.summary}
+							<div class="text-hud-text">{finding.detection_evidence.summary}</div>
+						{/if}
+						{#if finding.detection_evidence.aliases.length > 0}
+							<div class="flex flex-wrap gap-1 pt-1">
+								{#each finding.detection_evidence.aliases as alias}
+									<span class="rounded-sm border border-hud-border bg-hud-surface px-2 py-0.5 font-mono text-[11px] text-hud-text-muted">{alias}</span>
+								{/each}
+							</div>
+						{/if}
+					</div>
 				</div>
 			{/if}
 		</div>

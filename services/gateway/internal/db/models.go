@@ -57,15 +57,24 @@ type FindingCursor struct {
 
 type FindingDetail struct {
 	Finding
-	AdvisorySource string           `json:"advisory_source"`
-	CVSSVector     *string          `json:"cvss_vector,omitempty"`
-	Reachability   *float32         `json:"reachability,omitempty"`
-	IsDirectDep    *bool            `json:"is_direct_dep,omitempty"`
-	DepDepth       *int32           `json:"dep_depth,omitempty"`
-	ExposureClass  *string          `json:"exposure_class,omitempty"`
-	FixVersions    []string         `json:"fix_versions"`
-	Exploits       []ExploitRef     `json:"exploits"`
-	DependencyPath []DependencyEdge `json:"dependency_path"`
+	AdvisorySource    string             `json:"advisory_source"`
+	DetectionEvidence *DetectionEvidence `json:"detection_evidence,omitempty"`
+	CVSSVector        *string            `json:"cvss_vector,omitempty"`
+	Reachability      *float32           `json:"reachability,omitempty"`
+	IsDirectDep       *bool              `json:"is_direct_dep,omitempty"`
+	DepDepth          *int32             `json:"dep_depth,omitempty"`
+	ExposureClass     *string            `json:"exposure_class,omitempty"`
+	FixVersions       []string           `json:"fix_versions"`
+	Exploits          []ExploitRef       `json:"exploits"`
+	DependencyPath    []DependencyEdge   `json:"dependency_path"`
+}
+
+type DetectionEvidence struct {
+	Source                string     `json:"source"`
+	FetchedAt             *time.Time `json:"fetched_at,omitempty"`
+	Summary               *string    `json:"summary,omitempty"`
+	Aliases               []string   `json:"aliases"`
+	RangeEvaluationStatus string     `json:"range_evaluation_status"`
 }
 
 type ExploitRef struct {

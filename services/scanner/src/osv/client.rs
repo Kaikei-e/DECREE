@@ -4,7 +4,6 @@ use crate::error::{Result, ScannerError};
 use crate::osv::types::{
     OsvBatchRequest, OsvBatchResponse, OsvBatchResult, OsvQuery, OsvQueryPackage, OsvVulnerability,
 };
-use crate::osv::version::is_version_affected;
 use crate::sbom::model::NormalizedPackage;
 
 const OSV_BATCH_URL: &str = "https://api.osv.dev/v1/querybatch";
@@ -148,10 +147,6 @@ impl OsvClient {
         // Hydrate stub vulnerabilities with full details (severity, aliases, affected)
         self.hydrate_results(&mut all_results).await?;
 
-        // Filter out vulnerabilities where the package version is provably outside
-        // the affected range. This guards against false positives from OSV.
-        filter_unaffected(packages, &mut all_results);
-
         Ok(all_results)
     }
 
@@ -223,45 +218,6 @@ impl OsvClient {
         }
 
         Ok(())
-    }
-}
-
-/// Filter out vulnerabilities where the package version is provably outside
-/// the affected range declared in the advisory. When in doubt (unparseable
-/// versions, GIT ranges, etc.) the vulnerability is kept (conservative).
-fn filter_unaffected(packages: &[NormalizedPackage], results: &mut [OsvBatchResult]) {
-    for (pkg, batch_result) in packages.iter().zip(results.iter_mut()) {
-        let ecosystem_str = pkg.ecosystem.as_osv_str();
-        let before = batch_result.vulns.len();
-
-        batch_result.vulns.retain(|vuln| {
-            let dominated = is_version_affected(
-                &pkg.name,
-                &pkg.version,
-                ecosystem_str,
-                &vuln.affected,
-            );
-            if !dominated {
-                info!(
-                    vuln_id = %vuln.id,
-                    package = %pkg.name,
-                    version = %pkg.version,
-                    ecosystem = %ecosystem_str,
-                    "filtered false-positive: package version outside affected range"
-                );
-            }
-            dominated
-        });
-
-        let removed = before - batch_result.vulns.len();
-        if removed > 0 {
-            debug!(
-                package = %pkg.name,
-                version = %pkg.version,
-                removed,
-                "removed unaffected vulnerabilities via range check"
-            );
-        }
     }
 }
 

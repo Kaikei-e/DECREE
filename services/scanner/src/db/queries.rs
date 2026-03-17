@@ -186,6 +186,54 @@ where
     Ok(())
 }
 
+pub async fn upsert_advisory<'e, E>(
+    executor: E,
+    advisory_id: &str,
+    source: &str,
+    raw_json: &serde_json::Value,
+) -> sqlx::Result<()>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    sqlx::query(
+        r#"
+        INSERT INTO advisories (advisory_id, source, raw_json, fetched_at)
+        VALUES ($1, $2, $3, now())
+        ON CONFLICT (advisory_id, source) DO UPDATE SET
+            raw_json = EXCLUDED.raw_json,
+            fetched_at = now()
+        "#,
+    )
+    .bind(advisory_id)
+    .bind(source)
+    .bind(raw_json)
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+pub async fn insert_advisory_alias<'e, E>(
+    executor: E,
+    advisory_id: &str,
+    alias: &str,
+) -> sqlx::Result<()>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    sqlx::query(
+        r#"
+        INSERT INTO advisory_aliases (advisory_id, alias)
+        VALUES ($1, $2)
+        ON CONFLICT (advisory_id, alias) DO NOTHING
+        "#,
+    )
+    .bind(advisory_id)
+    .bind(alias)
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
 pub async fn insert_dependency_edge<'e, E>(
     executor: E,
     scan_id: Uuid,

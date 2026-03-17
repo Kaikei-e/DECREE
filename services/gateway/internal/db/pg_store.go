@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -199,6 +200,39 @@ func (s *PgStore) GetFindingDetail(ctx context.Context, instanceID uuid.UUID) (*
 		}
 		return nil, fmt.Errorf("get finding detail: %w", err)
 	}
+
+	var advisoryRaw []byte
+	var advisoryFetchedAt *time.Time
+	err = s.pool.QueryRow(ctx, `
+		SELECT raw_json, fetched_at
+		FROM advisories
+		WHERE advisory_id = $1 AND source = 'osv'
+	`, d.AdvisoryID).Scan(&advisoryRaw, &advisoryFetchedAt)
+	if err != nil && err != pgx.ErrNoRows {
+		return nil, fmt.Errorf("get advisory snapshot: %w", err)
+	}
+
+	aliasRows, err := s.pool.Query(ctx,
+		`SELECT alias FROM advisory_aliases WHERE advisory_id = $1 ORDER BY alias`, d.AdvisoryID)
+	if err != nil {
+		return nil, fmt.Errorf("get advisory aliases: %w", err)
+	}
+	aliases, err := pgx.CollectRows(aliasRows, func(row pgx.CollectableRow) (string, error) {
+		var alias string
+		err := row.Scan(&alias)
+		return alias, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get advisory aliases: %w", err)
+	}
+	d.DetectionEvidence = newDetectionEvidence(
+		d.PackageName,
+		d.PackageVersion,
+		d.Ecosystem,
+		advisoryRaw,
+		advisoryFetchedAt,
+		orEmpty(aliases),
+	)
 
 	// Fix versions
 	fixRows, err := s.pool.Query(ctx,

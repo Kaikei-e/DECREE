@@ -1,5 +1,22 @@
 use crate::osv::types::OsvAffected;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RangeEvaluationStatus {
+    SupportsMatch,
+    ContradictsMatch,
+    Inconclusive,
+}
+
+impl RangeEvaluationStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SupportsMatch => "supports_match",
+            Self::ContradictsMatch => "contradicts_match",
+            Self::Inconclusive => "inconclusive",
+        }
+    }
+}
+
 /// Check whether a package version falls within any of the affected ranges
 /// declared by an OSV vulnerability entry.
 ///
@@ -17,9 +34,21 @@ pub fn is_version_affected(
     ecosystem: &str,
     affected_entries: &[OsvAffected],
 ) -> bool {
+    !matches!(
+        classify_version_match(pkg_name, pkg_version, ecosystem, affected_entries),
+        RangeEvaluationStatus::ContradictsMatch
+    )
+}
+
+pub fn classify_version_match(
+    pkg_name: &str,
+    pkg_version: &str,
+    ecosystem: &str,
+    affected_entries: &[OsvAffected],
+) -> RangeEvaluationStatus {
     let parsed_version = match parse_version(pkg_version) {
         Some(v) => v,
-        None => return true, // can't parse → conservatively affected
+        None => return RangeEvaluationStatus::Inconclusive,
     };
 
     // Collect only affected entries that match our package
@@ -34,37 +63,65 @@ pub fn is_version_affected(
         // doesn't apply to us. If there are NO affected entries at all,
         // be conservative.
         if affected_entries.is_empty() {
-            return true;
+            return RangeEvaluationStatus::Inconclusive;
         }
         // All entries are for other packages — not affected
-        return false;
+        return RangeEvaluationStatus::ContradictsMatch;
     }
 
+    let mut saw_contradiction = false;
+    let mut saw_inconclusive = false;
+
     // For each matching affected entry, check all its ranges.
-    // The package is affected if ANY range in ANY matching entry says so.
+    // The package is supported if ANY range in ANY matching entry says so.
     for affected in &matching {
+        if affected.ranges.is_empty() {
+            saw_inconclusive = true;
+            continue;
+        }
+
         for range in &affected.ranges {
             match range.range_type.as_str() {
                 "SEMVER" | "ECOSYSTEM" => {}
-                _ => return true, // GIT or unknown range type → conservative
+                _ => {
+                    saw_inconclusive = true;
+                    continue;
+                }
             }
 
-            if evaluate_range_events(&range.events, &parsed_version) {
-                return true;
+            match evaluate_range_events(&range.events, &parsed_version) {
+                Some(true) => return RangeEvaluationStatus::SupportsMatch,
+                Some(false) => saw_contradiction = true,
+                None => saw_inconclusive = true,
             }
         }
     }
 
-    false
+    if saw_inconclusive {
+        RangeEvaluationStatus::Inconclusive
+    } else if saw_contradiction {
+        RangeEvaluationStatus::ContradictsMatch
+    } else {
+        RangeEvaluationStatus::Inconclusive
+    }
 }
 
 /// Evaluate a single range's events against a parsed version.
-/// Returns true if the version is affected according to the events.
+/// Returns Some(true/false) when the range can be evaluated, or None when it
+/// is safer to treat the result as inconclusive.
 ///
 /// OSV spec: walk events in order, tracking `is_affected`.
 /// - `introduced`: if version >= introduced, set is_affected = true
 /// - `fixed`: if version >= fixed, set is_affected = false
-fn evaluate_range_events(events: &[crate::osv::types::OsvEvent], version: &semver::Version) -> bool {
+/// - `last_known_affected`: if version > last_known_affected, set is_affected = false
+fn evaluate_range_events(
+    events: &[crate::osv::types::OsvEvent],
+    version: &semver::Version,
+) -> Option<bool> {
+    if events.is_empty() {
+        return None;
+    }
+
     let mut is_affected = false;
 
     for event in events {
@@ -80,7 +137,7 @@ fn evaluate_range_events(events: &[crate::osv::types::OsvEvent], version: &semve
                     if introduced == "0" {
                         is_affected = true;
                     } else {
-                        return true; // can't parse → conservative
+                        return None;
                     }
                 }
             }
@@ -92,12 +149,22 @@ fn evaluate_range_events(events: &[crate::osv::types::OsvEvent], version: &semve
                         is_affected = false;
                     }
                 }
-                None => return true, // can't parse → conservative
+                None => return None,
+            }
+        }
+        if let Some(ref last_known_affected) = event.last_known_affected {
+            match parse_version(last_known_affected) {
+                Some(last_known_ver) => {
+                    if version > &last_known_ver {
+                        is_affected = false;
+                    }
+                }
+                None => return None,
             }
         }
     }
 
-    is_affected
+    Some(is_affected)
 }
 
 /// Check if an OsvAffected entry matches the given package name and ecosystem.
@@ -148,11 +215,7 @@ mod tests {
     use super::*;
     use crate::osv::types::{OsvAffected, OsvAffectedPackage, OsvEvent, OsvRange};
 
-    fn make_affected(
-        pkg_name: &str,
-        ecosystem: &str,
-        ranges: Vec<OsvRange>,
-    ) -> OsvAffected {
+    fn make_affected(pkg_name: &str, ecosystem: &str, ranges: Vec<OsvRange>) -> OsvAffected {
         OsvAffected {
             package: Some(OsvAffectedPackage {
                 name: Some(pkg_name.to_string()),
@@ -180,6 +243,7 @@ mod tests {
         OsvEvent {
             introduced: Some(v.to_string()),
             fixed: None,
+            last_known_affected: None,
         }
     }
 
@@ -218,12 +282,7 @@ mod tests {
             "npm",
             vec![semver_range(vec![introduced("0"), fixed("4.17.21")])],
         )];
-        assert!(!is_version_affected(
-            "lodash",
-            "4.17.21",
-            "npm",
-            &affected
-        ));
+        assert!(!is_version_affected("lodash", "4.17.21", "npm", &affected));
     }
 
     // 3. Version above fixed → NOT affected
@@ -234,12 +293,7 @@ mod tests {
             "npm",
             vec![semver_range(vec![introduced("0"), fixed("4.17.21")])],
         )];
-        assert!(!is_version_affected(
-            "lodash",
-            "4.18.0",
-            "npm",
-            &affected
-        ));
+        assert!(!is_version_affected("lodash", "4.18.0", "npm", &affected));
     }
 
     // 4. Version above fix in ECOSYSTEM range → NOT affected
@@ -390,6 +444,10 @@ mod tests {
             ])],
         )];
         assert!(!is_version_affected("onnx", "1.20.1", "PyPI", &affected));
+        assert_eq!(
+            classify_version_match("onnx", "1.20.1", "PyPI", &affected),
+            RangeEvaluationStatus::ContradictsMatch
+        );
     }
 
     // 16. last_known_affected is inclusive, so the boundary version stays affected
@@ -404,6 +462,10 @@ mod tests {
             ])],
         )];
         assert!(is_version_affected("onnx", "1.20.0", "PyPI", &affected));
+        assert_eq!(
+            classify_version_match("onnx", "1.20.0", "PyPI", &affected),
+            RangeEvaluationStatus::SupportsMatch
+        );
     }
 
     // 17. Unparseable last_known_affected keeps the advisory conservatively
@@ -418,5 +480,9 @@ mod tests {
             ])],
         )];
         assert!(is_version_affected("onnx", "1.20.1", "PyPI", &affected));
+        assert_eq!(
+            classify_version_match("onnx", "1.20.1", "PyPI", &affected),
+            RangeEvaluationStatus::Inconclusive
+        );
     }
 }

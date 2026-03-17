@@ -124,6 +124,11 @@ func TestEndpoints(t *testing.T) {
 					IsActive:    true,
 				},
 				AdvisorySource: "osv",
+				DetectionEvidence: &db.DetectionEvidence{
+					Source:                "osv",
+					Aliases:               []string{"GHSA-test"},
+					RangeEvaluationStatus: "inconclusive",
+				},
 				FixVersions:    []string{"4.17.21"},
 				Exploits:       []db.ExploitRef{},
 				DependencyPath: []db.DependencyEdge{},
@@ -143,6 +148,50 @@ func TestEndpoints(t *testing.T) {
 				t.Fatalf("status = %d, want %d; body = %s", w.Code, tt.wantStatus, w.Body.String())
 			}
 		})
+	}
+}
+
+func TestFindingDetail_ResponseIncludesDetectionEvidence(t *testing.T) {
+	t.Parallel()
+	instanceID := uuid.New()
+	store := &mockStore{
+		findingDetail: &db.FindingDetail{
+			Finding: db.Finding{
+				InstanceID:  instanceID,
+				PackageName: "onnx",
+				IsActive:    true,
+			},
+			AdvisorySource: "nvd",
+			DetectionEvidence: &db.DetectionEvidence{
+				Source:                "osv",
+				Aliases:               []string{"GHSA-1234"},
+				RangeEvaluationStatus: "contradicts_match",
+			},
+			FixVersions:    []string{},
+			Exploits:       []db.ExploitRef{},
+			DependencyPath: []db.DependencyEdge{},
+		},
+	}
+
+	router := NewRouter(store, sse.NewBroker())
+	req := httptest.NewRequest("GET", "/api/findings/"+instanceID.String(), nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	var body struct {
+		Data db.FindingDetail `json:"data"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Data.DetectionEvidence == nil {
+		t.Fatal("expected detection evidence")
+	}
+	if body.Data.DetectionEvidence.Source != "osv" {
+		t.Fatalf("source = %q", body.Data.DetectionEvidence.Source)
+	}
+	if body.Data.DetectionEvidence.RangeEvaluationStatus != "contradicts_match" {
+		t.Fatalf("range status = %q", body.Data.DetectionEvidence.RangeEvaluationStatus)
 	}
 }
 
