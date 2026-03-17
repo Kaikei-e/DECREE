@@ -187,6 +187,15 @@ mod tests {
         OsvEvent {
             introduced: None,
             fixed: Some(v.to_string()),
+            last_known_affected: None,
+        }
+    }
+
+    fn last_known_affected(v: &str) -> OsvEvent {
+        OsvEvent {
+            introduced: None,
+            fixed: None,
+            last_known_affected: Some(v.to_string()),
         }
     }
 
@@ -367,5 +376,47 @@ mod tests {
         }];
         assert!(is_version_affected("foo", "1.0.0", "npm", &affected));
         assert!(!is_version_affected("foo", "3.0.0", "npm", &affected));
+    }
+
+    // 15. last_known_affected is inclusive, so version above it is not affected
+    #[test]
+    fn version_above_last_known_affected_is_not_affected() {
+        let affected = vec![make_affected(
+            "onnx",
+            "PyPI",
+            vec![ecosystem_range(vec![
+                introduced("0"),
+                last_known_affected("1.20.0"),
+            ])],
+        )];
+        assert!(!is_version_affected("onnx", "1.20.1", "PyPI", &affected));
+    }
+
+    // 16. last_known_affected is inclusive, so the boundary version stays affected
+    #[test]
+    fn last_known_affected_boundary_is_affected() {
+        let affected = vec![make_affected(
+            "onnx",
+            "PyPI",
+            vec![ecosystem_range(vec![
+                introduced("0"),
+                last_known_affected("1.20.0"),
+            ])],
+        )];
+        assert!(is_version_affected("onnx", "1.20.0", "PyPI", &affected));
+    }
+
+    // 17. Unparseable last_known_affected keeps the advisory conservatively
+    #[test]
+    fn unparseable_last_known_affected_is_conservative() {
+        let affected = vec![make_affected(
+            "onnx",
+            "PyPI",
+            vec![ecosystem_range(vec![
+                introduced("0"),
+                last_known_affected("not-a-version"),
+            ])],
+        )];
+        assert!(is_version_affected("onnx", "1.20.1", "PyPI", &affected));
     }
 }

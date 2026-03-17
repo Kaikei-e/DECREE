@@ -78,6 +78,7 @@ pub struct OsvRange {
 pub struct OsvEvent {
     pub introduced: Option<String>,
     pub fixed: Option<String>,
+    pub last_known_affected: Option<String>,
 }
 
 impl OsvVulnerability {
