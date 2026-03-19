@@ -16,6 +16,6 @@ type ObservationReader interface {
 	GetPreviousCompletedScanID(ctx context.Context, targetID, currentScanID uuid.UUID) (uuid.UUID, error)
 	GetExploitLinkedCVEs(ctx context.Context, cveIDs []string) (map[string]bool, error)
 	GetFixVersions(ctx context.Context, instanceID uuid.UUID) ([]string, error)
-	InsertDisappearance(ctx context.Context, instanceID, scanID uuid.UUID) error
+	ResolveFinding(ctx context.Context, instanceID, scanID uuid.UUID) error
 	InsertOutboxEvent(ctx context.Context, streamName string, payload any) error
 }

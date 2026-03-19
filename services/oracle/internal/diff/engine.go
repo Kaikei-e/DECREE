@@ -2,6 +2,7 @@ package diff
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math"
 
@@ -109,9 +110,8 @@ func (e *Engine) Detect(ctx context.Context, scanID, targetID uuid.UUID) ([]Diff
 	for id, obs := range previousMap {
 		if _, exists := currentMap[id]; !exists {
 			evt := buildEvent(DiffResolvedCVE, scanID, targetID, targetName, obs, nil)
-			// Record disappearance
-			if err := e.repo.InsertDisappearance(ctx, id, scanID); err != nil {
-				e.log.ErrorContext(ctx, "insert disappearance failed", "instance_id", id, "error", err)
+			if err := e.repo.ResolveFinding(ctx, id, scanID); err != nil {
+				return nil, fmt.Errorf("resolve finding %s: %w", id, err)
 			}
 			events = append(events, evt)
 		}

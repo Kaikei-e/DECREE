@@ -188,12 +188,55 @@ func (d *DB) GetExploitLinkedCVEs(ctx context.Context, cveIDs []string) (map[str
 	return result, rows.Err()
 }
 
-// InsertDisappearance records a vulnerability disappearance.
-func (d *DB) InsertDisappearance(ctx context.Context, instanceID, scanID uuid.UUID) error {
-	_, err := d.Pool.Exec(ctx, `
+// ResolveFinding records a vulnerability disappearance and marks the finding
+// as inactive in the projection table, within a single transaction.
+func (d *DB) ResolveFinding(ctx context.Context, instanceID, scanID uuid.UUID) error {
+	tx, err := d.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO vulnerability_disappearances (instance_id, scan_id)
-		VALUES ($1, $2)`, instanceID, scanID)
-	return err
+		VALUES ($1, $2)
+	`, instanceID, scanID); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE current_finding_status
+		SET is_active = false, updated_at = now()
+		WHERE instance_id = $1
+	`, instanceID); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
+}
+
+// BackfillResolvedFindings fixes stale current_finding_status rows that have
+// is_active = true despite having a disappearance record with no subsequent
+// re-observation. Returns the number of rows fixed.
+func (d *DB) BackfillResolvedFindings(ctx context.Context) (int64, error) {
+	tag, err := d.Pool.Exec(ctx, `
+		UPDATE current_finding_status
+		SET is_active = false, updated_at = now()
+		WHERE is_active = true
+		  AND EXISTS (
+		    SELECT 1 FROM vulnerability_disappearances vd
+		    WHERE vd.instance_id = current_finding_status.instance_id
+		      AND NOT EXISTS (
+		        SELECT 1 FROM vulnerability_observations vo
+		        WHERE vo.instance_id = current_finding_status.instance_id
+		          AND vo.observed_at > vd.disappeared_at
+		      )
+		  )
+	`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
 
 // InsertOutboxEvent inserts an event into stream_outbox for publishing to Redis.

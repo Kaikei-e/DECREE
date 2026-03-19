@@ -22,6 +22,18 @@ import (
 	"decree/services/oracle/internal/stream"
 )
 
+type resolvedFindingBackfiller interface {
+	BackfillResolvedFindings(ctx context.Context) (int64, error)
+}
+
+func runStartupBackfill(ctx context.Context, database resolvedFindingBackfiller) {
+	if count, err := database.BackfillResolvedFindings(ctx); err != nil {
+		slog.Warn("backfill resolved findings failed", "error", err)
+	} else if count > 0 {
+		slog.Info("backfilled resolved findings", "count", count)
+	}
+}
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
@@ -50,6 +62,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer database.Close()
+
+	// Backfill stale resolved findings from before the ResolveFinding fix.
+	runStartupBackfill(ctx, database)
 
 	// Redis client
 	redisOpt, err := redis.ParseURL(cfg.RedisURL)

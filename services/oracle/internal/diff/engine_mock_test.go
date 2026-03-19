@@ -2,6 +2,8 @@ package diff
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -21,7 +23,8 @@ type mockObservationReader struct {
 	exploits    map[string]bool
 	fixVersions map[uuid.UUID][]string
 
-	disappearances   []uuid.UUID
+	resolved         []uuid.UUID
+	resolveErr       error
 	outboxEvents     []any
 	exploitCallCount int
 }
@@ -63,8 +66,11 @@ func (m *mockObservationReader) GetFixVersions(_ context.Context, instanceID uui
 	return nil, nil
 }
 
-func (m *mockObservationReader) InsertDisappearance(_ context.Context, instanceID, _ uuid.UUID) error {
-	m.disappearances = append(m.disappearances, instanceID)
+func (m *mockObservationReader) ResolveFinding(_ context.Context, instanceID, _ uuid.UUID) error {
+	if m.resolveErr != nil {
+		return m.resolveErr
+	}
+	m.resolved = append(m.resolved, instanceID)
 	return nil
 }
 
@@ -150,8 +156,8 @@ func TestDetect_NewAndResolved(t *testing.T) {
 		t.Errorf("resolved_cve count = %d, want 1", kinds[DiffResolvedCVE])
 	}
 
-	if len(repo.disappearances) != 1 || repo.disappearances[0] != resolvedID {
-		t.Errorf("disappearances = %v, want [%s]", repo.disappearances, resolvedID)
+	if len(repo.resolved) != 1 || repo.resolved[0] != resolvedID {
+		t.Errorf("resolved = %v, want [%s]", repo.resolved, resolvedID)
 	}
 }
 
@@ -271,5 +277,60 @@ func TestDetect_OutboxEventsCreated(t *testing.T) {
 
 	if len(repo.outboxEvents) != 1 {
 		t.Errorf("outbox events = %d, want 1", len(repo.outboxEvents))
+	}
+}
+
+func TestDetect_ResolveFinding_ErrorFailsDetect(t *testing.T) {
+	prevScanID := uuid.New()
+	resolvedID := uuid.New()
+	score := float32(5.0)
+
+	repo := &mockObservationReader{
+		targetName: "test-target",
+		projectID:  uuid.New(),
+		prevScanID: prevScanID,
+		current:    []domain.Observation{},
+		previous: []domain.Observation{
+			{InstanceID: resolvedID, AdvisoryID: "CVE-2024-001", DecreeScore: &score, Severity: "high"},
+		},
+		resolveErr: fmt.Errorf("db connection lost"),
+	}
+
+	engine := NewEngine(repo)
+	_, err := engine.Detect(context.Background(), uuid.New(), uuid.New())
+	if err == nil {
+		t.Fatal("Detect() should return error when ResolveFinding fails")
+	}
+	if !strings.Contains(err.Error(), "resolve finding") {
+		t.Errorf("error = %q, want it to contain 'resolve finding'", err)
+	}
+}
+
+func TestDetect_NewCVE_DoesNotResolve(t *testing.T) {
+	prevScanID := uuid.New()
+	newID := uuid.New()
+	score := float32(7.0)
+
+	repo := &mockObservationReader{
+		targetName: "test-target",
+		projectID:  uuid.New(),
+		prevScanID: prevScanID,
+		current: []domain.Observation{
+			{InstanceID: newID, AdvisoryID: "CVE-2024-001", DecreeScore: &score, Severity: "high"},
+		},
+		previous: []domain.Observation{},
+	}
+
+	engine := NewEngine(repo)
+	events, err := engine.Detect(context.Background(), uuid.New(), uuid.New())
+	if err != nil {
+		t.Fatalf("Detect() error: %v", err)
+	}
+
+	if len(events) != 1 || events[0].Kind != DiffNewCVE {
+		t.Errorf("expected 1 new_cve event, got %v", events)
+	}
+	if len(repo.resolved) != 0 {
+		t.Errorf("resolved = %v, want empty", repo.resolved)
 	}
 }
