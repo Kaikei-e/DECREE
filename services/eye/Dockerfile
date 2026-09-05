@@ -1,5 +1,5 @@
-FROM node:20-alpine AS build
-RUN corepack enable && corepack prepare pnpm@latest --activate
+FROM node:24-alpine AS build
+RUN corepack enable && corepack prepare pnpm@10.18.1 --activate
 WORKDIR /app
 COPY package.json pnpm-lock.yaml* ./
 RUN pnpm install --frozen-lockfile
@@ -7,7 +7,7 @@ COPY . .
 RUN pnpm run build
 RUN pnpm prune --prod
 
-FROM node:20-alpine
+FROM node:24-alpine
 RUN addgroup -S decree && adduser -S decree -G decree
 WORKDIR /app
 COPY --from=build --chown=decree:decree /app/build ./build
