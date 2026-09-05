@@ -149,6 +149,49 @@ describe('FilterBar', () => {
 		expect(writtenParams().get('epss')).toBe('0.5');
 	});
 
+	it('offers a short ladder of score thresholds and marks the active one', () => {
+		const { getByRole } = render(FilterBar, { props: props({ query: { minScore: 5 } }) });
+
+		const group = getByRole('group', { name: 'Minimum DECREE Score' });
+		expect([...group.querySelectorAll('button')].map((b) => b.textContent?.trim())).toEqual([
+			'Any',
+			'4+',
+			'5+',
+			'6+',
+			'7+',
+		]);
+		expect(getByRole('button', { name: '5+' }).getAttribute('aria-pressed')).toBe('true');
+		expect(getByRole('button', { name: 'Any' }).getAttribute('aria-pressed')).toBe('false');
+	});
+
+	it('applies a threshold on the click, since a discrete choice has nothing to debounce', async () => {
+		vi.useFakeTimers();
+		const { getByRole } = render(FilterBar, { props: props() });
+
+		await fireEvent.click(getByRole('button', { name: '6+' }));
+		expect(writtenParams().get('score')).toBe('6');
+	});
+
+	it('clears the threshold through the Any option rather than another control', async () => {
+		const { getByRole } = render(FilterBar, { props: props({ query: { minScore: 7 } }) });
+
+		await fireEvent.click(getByRole('button', { name: 'Any' }));
+		expect(writtenParams().get('score')).toBeNull();
+	});
+
+	it('drops the selection when the threshold changes, like every other filter', async () => {
+		const { getByRole } = render(FilterBar, {
+			props: props({ view: { view: 'table', advisory: 'CVE-2021-44228', finding: 'inst-1' } }),
+		});
+
+		await fireEvent.click(getByRole('button', { name: '5+' }));
+
+		const params = writtenParams();
+		expect(params.get('score')).toBe('5');
+		expect(params.get('advisory')).toBeNull();
+		expect(params.get('finding')).toBeNull();
+	});
+
 	it('exposes the active-only toggle state and writes it to the URL', async () => {
 		const { getByRole } = render(FilterBar, { props: props() });
 		const toggle = getByRole('button', { name: 'Active Only' });
@@ -165,6 +208,7 @@ describe('FilterBar', () => {
 					severity: 'CRITICAL',
 					ecosystem: 'npm',
 					minEpss: 0.4,
+					minScore: 6,
 					q: 'log4j',
 					activeOnly: false,
 				},
@@ -178,6 +222,7 @@ describe('FilterBar', () => {
 		expect(params.get('severity')).toBeNull();
 		expect(params.get('ecosystem')).toBeNull();
 		expect(params.get('epss')).toBeNull();
+		expect(params.get('score')).toBeNull();
 		expect(params.get('q')).toBeNull();
 		expect(params.get('active')).toBeNull();
 		expect(params.get('view')).toBe('table');

@@ -19,13 +19,14 @@ describe('parseFindingsQuery', () => {
 	it('reads every supported filter', () => {
 		const q = parseFindingsQuery(
 			params(
-				'severity=CRITICAL&ecosystem=crates.io&epss=0.4&active=0&q=log4j&sort=severity&order=asc',
+				'severity=CRITICAL&ecosystem=crates.io&epss=0.4&score=5&active=0&q=log4j&sort=severity&order=asc',
 			),
 		);
 		expect(q).toEqual({
 			severity: 'CRITICAL',
 			ecosystem: 'crates.io',
 			minEpss: 0.4,
+			minScore: 5,
 			activeOnly: false,
 			q: 'log4j',
 			sort: 'severity',
@@ -50,6 +51,14 @@ describe('parseFindingsQuery', () => {
 		expect(parseFindingsQuery(params('epss=2')).minEpss).toBeUndefined();
 		expect(parseFindingsQuery(params('epss=-1')).minEpss).toBeUndefined();
 		expect(parseFindingsQuery(params('epss=0')).minEpss).toBeUndefined();
+	});
+
+	it('drops a non-numeric or out-of-range score, the scale being 0-10', () => {
+		expect(parseFindingsQuery(params('score=abc')).minScore).toBeUndefined();
+		expect(parseFindingsQuery(params('score=10.1')).minScore).toBeUndefined();
+		expect(parseFindingsQuery(params('score=-1')).minScore).toBeUndefined();
+		expect(parseFindingsQuery(params('score=0')).minScore).toBeUndefined();
+		expect(parseFindingsQuery(params('score=10')).minScore).toBe(10);
 	});
 
 	it('trims a search term and drops a blank one', () => {
@@ -104,6 +113,7 @@ describe('toSearchParams', () => {
 			severity: 'HIGH',
 			ecosystem: 'npm',
 			minEpss: 0.25,
+			minScore: 6,
 			activeOnly: false,
 			q: 'lodash',
 			sort: 'epss' as const,
@@ -115,6 +125,11 @@ describe('toSearchParams', () => {
 
 		expect(parseFindingsQuery(search)).toEqual(findings);
 		expect(parseViewQuery(search)).toEqual(view);
+	});
+
+	it('omits the score threshold at its off position so a shared URL stays short', () => {
+		expect(toSearchParams({ ...DEFAULT_FINDINGS_QUERY, minScore: 0 }).has('score')).toBe(false);
+		expect(toSearchParams({ ...DEFAULT_FINDINGS_QUERY, minScore: 5 }).get('score')).toBe('5');
 	});
 
 	it('emits active=0 only when active-only is switched off', () => {

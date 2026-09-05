@@ -5,6 +5,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -128,30 +129,54 @@ func ids(findings []Finding) []string {
 
 func TestListFindings_KeysetPaginationCoversEveryRowOnce(t *testing.T) {
 	store := testPool(t)
-	from := fixtureFrom(keysetFixture)
-	projectID := uuid.MustParse(fixtureProjectID)
+	assertPagesEveryRowOnce(t, store, fixtureFrom(keysetFixture),
+		FindingFilters{ProjectID: uuid.MustParse(fixtureProjectID)}, len(keysetFixture))
+}
 
+// A filter narrows the relation the keyset walks, so the predicate has to stay
+// exactly the negation of "already returned" over the narrowed set too.
+func TestListFindings_MinScoreKeysetPaginationCoversEveryRowOnce(t *testing.T) {
+	store := testPool(t)
+	minScore := float32(5)
+
+	want := 0
+	for _, r := range keysetFixture {
+		v, err := strconv.ParseFloat(r.score, 32)
+		if err == nil && v >= 5 {
+			want++
+		}
+	}
+	if want < 4 {
+		t.Fatalf("fixture leaves only %d rows above the threshold; too few to page", want)
+	}
+
+	assertPagesEveryRowOnce(t, store, fixtureFrom(keysetFixture),
+		FindingFilters{ProjectID: uuid.MustParse(fixtureProjectID), MinScore: &minScore}, want)
+}
+
+func assertPagesEveryRowOnce(t *testing.T, store *PgStore, from string, filters FindingFilters, wantRows int) {
+	t.Helper()
 	for _, key := range sortKeyOrder {
 		for _, desc := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s_%v", key, desc), func(t *testing.T) {
 				base := FindingParams{
-					FindingFilters: FindingFilters{ProjectID: projectID},
+					FindingFilters: filters,
 					Sort:           key,
 					SortDesc:       desc,
 				}
 
 				unpaged := base
-				unpaged.Limit = len(keysetFixture) + 10
+				unpaged.Limit = wantRows + 10
 				want, _ := queryFixture(t, store, unpaged, from)
-				if len(want) != len(keysetFixture) {
-					t.Fatalf("unpaged returned %d rows, want %d", len(want), len(keysetFixture))
+				if len(want) != wantRows {
+					t.Fatalf("unpaged returned %d rows, want %d", len(want), wantRows)
 				}
 
 				var got []Finding
 				page := base
 				page.Limit = 3
 				for i := 0; ; i++ {
-					if i > len(keysetFixture)+5 {
+					if i > wantRows+5 {
 						t.Fatalf("pagination did not terminate; collected %d rows", len(got))
 					}
 					rows, hasMore := queryFixture(t, store, page, from)
@@ -239,6 +264,7 @@ func TestListFindings_RealTablesAcceptEverySort(t *testing.T) {
 	severity := "critical"
 	ecosystem := "npm"
 	minEPSS := float32(0.1)
+	minScore := float32(5)
 	advisory := "CVE-2024-0001"
 
 	for _, key := range sortKeyOrder {
@@ -249,6 +275,7 @@ func TestListFindings_RealTablesAcceptEverySort(t *testing.T) {
 					Severity:   &severity,
 					Ecosystem:  &ecosystem,
 					MinEPSS:    &minEPSS,
+					MinScore:   &minScore,
 					Advisory:   &advisory,
 					Query:      &q,
 					ActiveOnly: true,

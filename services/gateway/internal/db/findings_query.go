@@ -26,6 +26,10 @@ const DefaultSortKey = SortDecreeScore
 // MaxSearchLength caps the free-text `q` filter, in runes.
 const MaxSearchLength = 128
 
+// MaxDecreeScore is the upper bound of the DECREE Score scale (ADR-0035); it
+// bounds the `min_score` filter.
+const MaxDecreeScore = 10
+
 // sortColumn describes one whitelisted sort key. Every expr is total (never
 // NULL) so the ORDER BY and the keyset predicate compare the same value space.
 type sortColumn struct {
@@ -257,6 +261,12 @@ func filterConditions(f FindingFilters, b *binder) []string {
 	if f.MinEPSS != nil {
 		conditions = append(conditions, fmt.Sprintf(
 			"COALESCE(epss.epss_score, vo.epss_score) >= $%d", b.bind(*f.MinEPSS)))
+	}
+	// An unscored finding cannot be asserted to clear a threshold, so a NULL
+	// last_score drops out rather than being COALESCEd to zero. At zero the
+	// threshold is the identity and must keep those rows, so it adds nothing.
+	if f.MinScore != nil && *f.MinScore > 0 {
+		conditions = append(conditions, fmt.Sprintf("cfs.last_score >= $%d", b.bind(*f.MinScore)))
 	}
 	if f.Query != nil {
 		n := b.bind("%" + escapeLike(*f.Query) + "%")

@@ -71,7 +71,7 @@ func TestAdvisories_FiltersForwarded(t *testing.T) {
 	t.Parallel()
 	store := &mockStore{advisories: []db.AdvisoryGroup{}}
 	doGet(t, store, "/api/projects/"+uuid.New().String()+
-		"/advisories?severity=CRITICAL&ecosystem=Maven&min_epss=0.5&active_only=true&limit=7&q=log4j")
+		"/advisories?severity=CRITICAL&ecosystem=Maven&min_epss=0.5&min_score=6&active_only=true&limit=7&q=log4j")
 
 	p := store.advisoryParams
 	if p.Severity == nil || *p.Severity != "critical" {
@@ -82,6 +82,9 @@ func TestAdvisories_FiltersForwarded(t *testing.T) {
 	}
 	if p.MinEPSS == nil || *p.MinEPSS != 0.5 {
 		t.Errorf("min_epss = %v", p.MinEPSS)
+	}
+	if p.MinScore == nil || *p.MinScore != 6 {
+		t.Errorf("min_score = %v", p.MinScore)
 	}
 	if !p.ActiveOnly || p.Limit != 7 {
 		t.Errorf("active_only/limit = %v/%d", p.ActiveOnly, p.Limit)

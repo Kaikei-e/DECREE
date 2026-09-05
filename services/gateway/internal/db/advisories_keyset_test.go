@@ -5,6 +5,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -65,19 +66,44 @@ func advisoryIDs(groups []AdvisoryGroup) []string {
 func TestListAdvisories_KeysetPaginationCoversEveryGroupOnce(t *testing.T) {
 	store := testPool(t)
 	fixture := append(append([]fixtureRow{}, keysetFixture...), advisoryFixture...)
-	from := advisoryFixtureFrom(fixture)
-	projectID := uuid.MustParse(fixtureProjectID)
 
 	distinct := map[string]bool{}
 	for _, r := range fixture {
 		distinct[r.advisoryID] = true
 	}
 
+	assertPagesEveryGroupOnce(t, store, advisoryFixtureFrom(fixture),
+		FindingFilters{ProjectID: uuid.MustParse(fixtureProjectID)}, distinct)
+}
+
+// The keyset lives in HAVING and pages over groups that a WHERE filter has already
+// narrowed, so it has to stay exact once instances drop out before the aggregation.
+func TestListAdvisories_MinScoreKeysetPaginationCoversEveryGroupOnce(t *testing.T) {
+	store := testPool(t)
+	fixture := append(append([]fixtureRow{}, keysetFixture...), advisoryFixture...)
+	minScore := float32(5)
+
+	distinct := map[string]bool{}
+	for _, r := range fixture {
+		if v, err := strconv.ParseFloat(r.score, 32); err == nil && v >= 5 {
+			distinct[r.advisoryID] = true
+		}
+	}
+	if len(distinct) < 4 {
+		t.Fatalf("fixture leaves only %d groups above the threshold; too few to page", len(distinct))
+	}
+
+	assertPagesEveryGroupOnce(t, store, advisoryFixtureFrom(fixture),
+		FindingFilters{ProjectID: uuid.MustParse(fixtureProjectID), MinScore: &minScore}, distinct)
+}
+
+func assertPagesEveryGroupOnce(t *testing.T, store *PgStore, from string, filters FindingFilters, distinct map[string]bool) {
+	t.Helper()
 	for _, key := range advisorySortKeyOrder {
 		for _, desc := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s_%v", key, desc), func(t *testing.T) {
 				base := AdvisoryParams{
-					FindingFilters: FindingFilters{ProjectID: projectID},
+					FindingFilters: filters,
 					Sort:           key,
 					SortDesc:       desc,
 				}
@@ -239,6 +265,37 @@ func TestListAdvisories_FiltersApplyBeforeAggregation(t *testing.T) {
 		t.Error("an advisory with no active instance must drop out entirely")
 	}
 
+	// CVE-9000-0001 spans a 5.0 instance on api, a 9.9 instance on web and an
+	// unscored one, so a threshold between them has to be visible in the counts.
+	minScore := float32(6)
+	scored := AdvisoryParams{
+		FindingFilters: FindingFilters{ProjectID: projectID, MinScore: &minScore},
+		Sort:           SortAdvisory,
+		Limit:          20,
+	}
+	groups, _ = queryAdvisoryFixture(t, store, scored, from)
+	byID = map[string]AdvisoryGroup{}
+	for _, g := range groups {
+		byID[g.AdvisoryID] = g
+	}
+	mixed, ok = byID["CVE-9000-0001"]
+	if !ok {
+		t.Fatal("CVE-9000-0001 has a 9.9 instance and must survive min_score=6")
+	}
+	if mixed.InstanceCount != 1 || mixed.TargetCount != 1 {
+		t.Errorf("min_score counts = %d/%d, want 1/1 (filter applies before grouping)",
+			mixed.InstanceCount, mixed.TargetCount)
+	}
+	if strings.Join(mixed.TargetNames, ",") != "web" {
+		t.Errorf("target_names = %v, want only the target above the threshold", mixed.TargetNames)
+	}
+	if _, ok := byID["CVE-9000-0002"]; ok {
+		t.Error("an advisory whose only instance is unscored must drop out of min_score")
+	}
+	if _, ok := byID["CVE-9000-0003"]; ok {
+		t.Error("an advisory scoring 1.0 throughout must drop out of min_score=6")
+	}
+
 	advisory := "CVE-9000-0003"
 	single := AdvisoryParams{
 		FindingFilters: FindingFilters{ProjectID: projectID, Advisory: &advisory},
@@ -259,6 +316,7 @@ func TestListAdvisories_RealTablesAcceptEverySort(t *testing.T) {
 	ecosystem := "npm"
 	advisory := "CVE-2021-44228"
 	minEPSS := float32(0.1)
+	minScore := float32(5)
 
 	for _, key := range advisorySortKeyOrder {
 		for _, desc := range []bool{true, false} {
@@ -268,6 +326,7 @@ func TestListAdvisories_RealTablesAcceptEverySort(t *testing.T) {
 					Severity:   &severity,
 					Ecosystem:  &ecosystem,
 					MinEPSS:    &minEPSS,
+					MinScore:   &minScore,
 					Advisory:   &advisory,
 					Query:      &q,
 					ActiveOnly: true,

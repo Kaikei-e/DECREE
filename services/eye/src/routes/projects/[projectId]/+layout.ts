@@ -21,6 +21,7 @@ export const load: LayoutLoad = async ({ params, url, fetch }) => {
 		severity: query.severity,
 		ecosystem: query.ecosystem,
 		min_epss: query.minEpss,
+		min_score: query.minScore,
 		active_only: query.activeOnly,
 		q: query.q,
 	};

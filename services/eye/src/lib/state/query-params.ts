@@ -7,6 +7,8 @@ export interface FindingsQuery {
 	/** Case-sensitive: the gateway compares ecosystem with an exact match. */
 	ecosystem?: string;
 	minEpss?: number;
+	/** DECREE Score floor on the 0-10 scale (ADR-0035). */
+	minScore?: number;
 	activeOnly: boolean;
 	q?: string;
 	sort: FindingSort;
@@ -37,6 +39,9 @@ const VIEW_MODES: readonly ViewMode[] = ['3d', '2d', 'table'];
 /** The gateway rejects a longer term with a 400, so clamp rather than let the request fail. */
 const MAX_QUERY_LENGTH = 128;
 
+/** The gateway rejects a score outside this range with a 400. */
+const MAX_SCORE = 10;
+
 export const DEFAULT_FINDINGS_QUERY: FindingsQuery = {
 	activeOnly: true,
 	sort: 'decree_score',
@@ -62,6 +67,9 @@ export function parseFindingsQuery(search: URLSearchParams): FindingsQuery {
 
 	const epss = Number.parseFloat(search.get('epss') ?? '');
 	if (Number.isFinite(epss) && epss > 0 && epss <= 1) query.minEpss = epss;
+
+	const score = Number.parseFloat(search.get('score') ?? '');
+	if (Number.isFinite(score) && score > 0 && score <= MAX_SCORE) query.minScore = score;
 
 	const term = search.get('q')?.trim().slice(0, MAX_QUERY_LENGTH);
 	if (term) query.q = term;
@@ -97,6 +105,9 @@ export function toSearchParams(
 	if (findings.ecosystem) search.set('ecosystem', findings.ecosystem);
 	if (findings.minEpss != null && findings.minEpss > 0) {
 		search.set('epss', String(findings.minEpss));
+	}
+	if (findings.minScore != null && findings.minScore > 0) {
+		search.set('score', String(findings.minScore));
 	}
 	if (!findings.activeOnly) search.set('active', '0');
 	if (findings.q) search.set('q', findings.q);

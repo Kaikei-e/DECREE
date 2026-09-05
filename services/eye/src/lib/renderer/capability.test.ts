@@ -1,6 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { detectCapability, resetCapabilityCache } from './capability';
 
+function stubCanvasContext(getContext: () => unknown) {
+	const origCreateElement = document.createElement.bind(document);
+	vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
+		const el = origCreateElement(tag);
+		if (tag === 'canvas') {
+			(el as HTMLCanvasElement).getContext = getContext as never;
+		}
+		return el;
+	});
+}
+
 describe('detectCapability', () => {
 	afterEach(() => {
 		resetCapabilityCache();
@@ -8,26 +19,43 @@ describe('detectCapability', () => {
 	});
 
 	it('returns canvas2d in jsdom (no WebGL)', async () => {
-		const result = await detectCapability();
-		expect(result).toBe('canvas2d');
+		const report = await detectCapability();
+		expect(report.capability).toBe('canvas2d');
 	});
 
 	it('returns webgl2 when WebGL2 context is available', async () => {
 		const mockLoseContext = vi.fn();
-		const origCreateElement = document.createElement.bind(document);
-		vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
-			const el = origCreateElement(tag);
-			if (tag === 'canvas') {
-				(el as HTMLCanvasElement).getContext = vi.fn().mockReturnValue({
-					getExtension: vi.fn().mockReturnValue({ loseContext: mockLoseContext }),
-				}) as never;
-			}
-			return el;
-		});
+		stubCanvasContext(
+			vi.fn().mockReturnValue({
+				getExtension: vi.fn().mockReturnValue({ loseContext: mockLoseContext }),
+			}),
+		);
 
-		const result = await detectCapability();
-		expect(result).toBe('webgl2');
+		const report = await detectCapability();
+		expect(report.capability).toBe('webgl2');
+		expect(report.reason).toBeNull();
 		expect(mockLoseContext).toHaveBeenCalledOnce();
+	});
+
+	it('says a refused context is different from a thrown one', async () => {
+		stubCanvasContext(vi.fn().mockReturnValue(null));
+
+		const refused = await detectCapability();
+		expect(refused.capability).toBe('canvas2d');
+		expect(refused.reason).toMatch(/did not provide a WebGL2 context/i);
+
+		resetCapabilityCache();
+		vi.restoreAllMocks();
+
+		stubCanvasContext(
+			vi.fn().mockImplementation(() => {
+				throw new Error('WebGL is disabled by policy');
+			}),
+		);
+
+		const thrown = await detectCapability();
+		expect(thrown.capability).toBe('canvas2d');
+		expect(thrown.reason).toContain('WebGL is disabled by policy');
 	});
 
 	it('caches result and does not create context on subsequent calls', async () => {

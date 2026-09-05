@@ -1,19 +1,31 @@
 import { Canvas2DRenderer } from './canvas2d/Canvas2DRenderer';
 import { detectCapability } from './capability';
 import { ThreeSceneRenderer } from './three/ThreeSceneRenderer';
-import type { SceneRenderer } from './types';
+import type { RendererChoice, RendererStatus, SceneRenderer } from './types';
 
-export type RendererChoice = '3d' | '2d';
+export interface CreatedRenderer {
+	renderer: SceneRenderer;
+	status: RendererStatus;
+}
 
-export async function createRenderer(choice?: RendererChoice): Promise<SceneRenderer> {
+export async function createRenderer(choice?: RendererChoice): Promise<CreatedRenderer> {
 	if (choice === '2d') {
-		return new Canvas2DRenderer();
+		return { renderer: new Canvas2DRenderer(), status: { kind: '2d', fallback: null } };
 	}
 
-	const cap = await detectCapability();
-	if (cap === 'webgl2') {
-		return new ThreeSceneRenderer();
+	const report = await detectCapability();
+	if (report.capability === 'webgl2') {
+		return { renderer: new ThreeSceneRenderer(), status: { kind: '3d', fallback: null } };
 	}
 
-	return new Canvas2DRenderer();
+	return {
+		renderer: new Canvas2DRenderer(),
+		status: {
+			kind: '2d',
+			fallback: {
+				reason: 'webgl2-unavailable',
+				detail: report.reason ?? 'WebGL2 is not available here.',
+			},
+		},
+	};
 }

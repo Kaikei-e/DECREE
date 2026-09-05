@@ -34,7 +34,7 @@ const instanceSummary: VisualizationInsights = {
 };
 
 function props(overrides: Record<string, unknown> = {}) {
-	return { summary: advisorySummary, view: '3d' as const, fallbackRenderer: false, ...overrides };
+	return { summary: advisorySummary, view: '3d' as const, fallback: null, ...overrides };
 }
 
 describe('SceneGuide', () => {
@@ -75,11 +75,36 @@ describe('SceneGuide', () => {
 
 	it('does not claim 3D when the renderer silently fell back', () => {
 		const { getByText, queryByText } = render(SceneGuide, {
-			props: props({ fallbackRenderer: true }),
+			props: props({
+				fallback: { reason: 'webgl2-unavailable', detail: 'Driver blocklisted WebGL2.' },
+			}),
 		});
 
 		expect(getByText('2D fallback · WebGL2 unavailable')).toBeTruthy();
 		expect(queryByText('3D spatial mode')).toBeNull();
+	});
+
+	it('does not blame WebGL2 when WebGL2 was there and the scene still failed', () => {
+		const { getByText, queryByText } = render(SceneGuide, {
+			props: props({
+				fallback: { reason: 'scene-init-failed', detail: 'Error creating WebGL context.' },
+			}),
+		});
+
+		expect(getByText('2D fallback · 3D scene failed to start')).toBeTruthy();
+		expect(queryByText('2D fallback · WebGL2 unavailable')).toBeNull();
+		expect(queryByText('3D spatial mode')).toBeNull();
+	});
+
+	it('keeps the underlying reason reachable without printing it into the layout', () => {
+		const { getByText } = render(SceneGuide, {
+			props: props({
+				fallback: { reason: 'scene-init-failed', detail: 'Error creating WebGL context.' },
+			}),
+		});
+
+		const badge = getByText('2D fallback · 3D scene failed to start');
+		expect(badge.getAttribute('title')).toBe('Error creating WebGL context.');
 	});
 
 	it('says the loaded set was capped instead of presenting it as a total', () => {

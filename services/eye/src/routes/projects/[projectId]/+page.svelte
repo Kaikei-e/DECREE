@@ -20,7 +20,7 @@ import {
 	getTopAdvisories,
 	getTopVisibleRisks,
 } from '$lib/graph/insights';
-import { detectCapability } from '$lib/renderer/capability';
+import type { RendererStatus } from '$lib/renderer/types';
 import { appState } from '$lib/state/app.svelte';
 import {
 	DEFAULT_FINDINGS_QUERY,
@@ -29,6 +29,7 @@ import {
 	toSearchParams,
 	type ViewQuery,
 } from '$lib/state/query-params';
+import { liveAdvisories } from '$lib/state/sse-manager.svelte';
 import type { Finding, FindingDetail } from '$lib/types/api';
 
 let { data } = $props();
@@ -47,19 +48,25 @@ const hasActiveFilters = $derived(
 	data.query.severity != null ||
 		data.query.ecosystem != null ||
 		(data.query.minEpss ?? 0) > 0 ||
+		(data.query.minScore ?? 0) > 0 ||
 		data.query.q != null ||
 		data.query.activeOnly === false,
 );
 
-const advisoryGraph = $derived(computeAdvisoryLayout(data.advisories));
+// The layout seeds this from the loader; the stream patches it in place. Reading the store
+// rather than data.advisories is what lets an event reach the scene and the table.
+const advisories = $derived(liveAdvisories.groups);
+const estimated = $derived(liveAdvisories.estimated);
+
+const advisoryGraph = $derived(computeAdvisoryLayout(advisories, estimated));
 const selectedAdvisory = $derived(
-	data.advisories.find((group) => group.advisory_id === advisoryId) ?? null,
+	advisories.find((group) => group.advisory_id === advisoryId) ?? null,
 );
 
 const sceneSummary = $derived(
 	viewMode === '2d'
 		? buildInstanceInsights(data.findings, appState.graphModel, data.truncated)
-		: buildAdvisoryInsights(data.advisories, advisoryGraph, data.truncated),
+		: buildAdvisoryInsights(advisories, advisoryGraph, data.truncated),
 );
 // The queue ranks whatever the current view is made of, so it never shows the same
 // advisory several times next to a table that has already grouped it.
@@ -74,12 +81,14 @@ const queueItems = $derived<QueueItem[]>(
 				secondary: `${f.target_name} / ${f.ecosystem}`,
 				score: f.decree_score,
 			}))
-		: getTopAdvisories(data.advisories).map((a) => ({
+		: getTopAdvisories(advisories).map((a) => ({
 				id: a.advisory_id,
 				advisoryId: a.advisory_id,
 				severity: a.severity,
 				primary: a.package_names[0] ?? '(unknown package)',
-				secondary: `${a.instance_count} instances across ${a.target_count} targets`,
+				secondary: estimated.has(a.advisory_id)
+					? `~${a.instance_count} instances across ~${a.target_count} targets (reconciling)`
+					: `${a.instance_count} instances across ${a.target_count} targets`,
 				score: a.max_decree_score,
 			})),
 );
@@ -89,13 +98,15 @@ let hoveredNode = $state<{ id: string; x: number; y: number } | null>(null);
 const hoverGraph = $derived(viewMode === '3d' ? advisoryGraph : appState.graphModel);
 const graphNode = $derived(hoveredNode ? (hoverGraph.nodes.get(hoveredNode.id) ?? null) : null);
 
-let capability = $state<'webgl2' | 'canvas2d' | null>(null);
-$effect(() => {
-	detectCapability().then((detected) => {
-		capability = detected;
-	});
-});
-const fallbackRenderer = $derived(capability === 'canvas2d');
+// The canvas reports what it managed to mount; guessing from capability detection here
+// missed the case where WebGL2 exists but the 3D scene still fails to start.
+let sceneRenderer = $state<RendererStatus | null>(null);
+const sceneFallback = $derived(sceneRenderer?.fallback ?? null);
+const isFlatScene = $derived(sceneFallback !== null);
+
+function onRendererReady(status: RendererStatus) {
+	sceneRenderer = status;
+}
 
 let isNarrow = $state(false);
 $effect(() => {
@@ -152,6 +163,8 @@ let instancesGeneration = 0;
 $effect(() => {
 	const id = advisoryId;
 	const activeOnly = data.query.activeOnly;
+	// The advisory card counts instances after filtering, so the expanded list has to filter alike.
+	const minScore = data.query.minScore;
 	const generation = ++instancesGeneration;
 
 	if (!id) {
@@ -163,6 +176,7 @@ $effect(() => {
 	getFindings(data.projectId, {
 		advisory: id,
 		active_only: activeOnly,
+		min_score: minScore,
 		sort: 'decree_score',
 		order: 'desc',
 	})
@@ -240,8 +254,8 @@ $effect(() => {
 			visibleCount = TABLE_PAGE_SIZE;
 		});
 });
-const visibleGroups = $derived(data.advisories.slice(0, visibleCount));
-const hasMoreGroups = $derived(visibleCount < data.advisories.length);
+const visibleGroups = $derived(advisories.slice(0, visibleCount));
+const hasMoreGroups = $derived(visibleCount < advisories.length);
 
 const minDate = $derived(
 	data.findings.length > 0
@@ -311,12 +325,13 @@ $effect(() => {
 				: 'xl:grid-cols-[minmax(0,1fr)_20rem]'}"
 		>
 			<div class="flex min-h-[34rem] flex-col gap-3 xl:min-h-0">
-				<SceneGuide summary={sceneSummary} view={viewMode} {fallbackRenderer} />
+				<SceneGuide summary={sceneSummary} view={viewMode} fallback={sceneFallback} />
 
 				{#if viewMode === 'table'}
 					<div class="min-h-[24rem] flex-1 xl:min-h-0">
 						<FindingsTable
 							groups={visibleGroups}
+							{estimated}
 							sort={data.query.sort}
 							order={data.query.order}
 							selectedAdvisoryId={advisoryId}
@@ -341,11 +356,15 @@ $effect(() => {
 				{:else}
 					<div class="relative min-h-[24rem] flex-1 overflow-hidden hud-panel hud-scanlines bg-hud-void/96 xl:min-h-0">
 						<div class="absolute left-4 top-4 z-10 max-w-xs rounded-sm border border-hud-border bg-hud-base/92 px-3 py-2 backdrop-blur">
-							<h2 class="hud-header">{fallbackRenderer ? 'Threat Map' : 'Threat Skyline'}</h2>
+							<h2 class="hud-header">{isFlatScene ? 'Threat Map' : 'Threat Skyline'}</h2>
 							<p class="mt-1 text-xs leading-5 text-hud-text-secondary">
-								{#if fallbackRenderer}
+								{#if sceneFallback?.reason === 'webgl2-unavailable'}
 									WebGL2 is unavailable here, so the skyline is drawn flat. Drag to pan, scroll to
 									zoom, and open a column to see the instances behind it.
+								{:else if sceneFallback}
+									The 3D scene could not start on this device, so the skyline is drawn flat.
+									Reloading the page may bring it back. Drag to pan, scroll to zoom, and open a
+									column to see the instances behind it.
 								{:else}
 									Drag to orbit, read the tallest columns first, and use the camera tools to compare
 									ecosystem districts before opening an advisory.
@@ -353,7 +372,7 @@ $effect(() => {
 							</p>
 						</div>
 
-						{#if !fallbackRenderer}
+						{#if !isFlatScene}
 							<div class="absolute bottom-20 left-4 top-36 z-10 hidden w-10 items-center justify-center md:flex">
 								<div class="flex h-full flex-col items-center justify-between rounded-full border border-hud-border bg-hud-base/92 px-2 py-3 backdrop-blur">
 									<span class="font-mono text-[10px] uppercase tracking-[0.16em] text-hud-text-secondary [writing-mode:vertical-rl] [text-orientation:mixed]">
@@ -372,7 +391,7 @@ $effect(() => {
 							<span class="mr-auto rounded-sm border border-hud-border bg-hud-base/92 px-2 py-1 backdrop-blur">District = ecosystem</span>
 							<span class="rounded-sm border border-hud-border bg-hud-base/92 px-2 py-1 backdrop-blur">Column = advisory</span>
 							<span class="rounded-sm border border-hud-border bg-hud-base/92 px-2 py-1 backdrop-blur">Colour + notches = severity</span>
-							<span class="rounded-sm border border-hud-border bg-hud-base/92 px-2 py-1 backdrop-blur">{fallbackRenderer ? 'Brightness = DECREE score' : 'Height = DECREE score'}</span>
+							<span class="rounded-sm border border-hud-border bg-hud-base/92 px-2 py-1 backdrop-blur">{isFlatScene ? 'Brightness = DECREE score' : 'Height = DECREE score'}</span>
 							<span class="rounded-sm border border-hud-border bg-hud-base/92 px-2 py-1 backdrop-blur">Width = instances</span>
 						</div>
 
@@ -384,6 +403,7 @@ $effect(() => {
 							onClearFilters={clearFilters}
 							onNodeClick={selectAdvisory}
 							{onNodeHover}
+							{onRendererReady}
 						/>
 
 						<NodeTooltip
@@ -408,6 +428,7 @@ $effect(() => {
 			<DetailPanel
 				finding={findingDetail}
 				advisory={selectedAdvisory}
+				advisoryEstimated={advisoryId ? estimated.has(advisoryId) : false}
 				instances={advisoryInstances}
 				loading={panelLoading}
 				error={panelError}
@@ -418,7 +439,7 @@ $effect(() => {
 			/>
 		</div>
 
-		<div class="z-10 shrink-0 overflow-x-auto px-2 pb-2">
+		<div class="z-10 shrink-0 px-2 pb-2">
 			<TimelineSlider {minDate} {maxDate} />
 		</div>
 	{/if}

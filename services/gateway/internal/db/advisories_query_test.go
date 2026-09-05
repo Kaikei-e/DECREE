@@ -115,9 +115,10 @@ func TestBuildAdvisoriesQuery_SharesFindingFilters(t *testing.T) {
 	ecosystem := "npm"
 	advisory := "CVE-2024-0001"
 	minEPSS := float32(0.25)
+	minScore := float32(5)
 	filters := FindingFilters{
 		ProjectID: uuid.New(), Severity: &severity, Ecosystem: &ecosystem,
-		MinEPSS: &minEPSS, Advisory: &advisory, Query: &q, ActiveOnly: true,
+		MinEPSS: &minEPSS, MinScore: &minScore, Advisory: &advisory, Query: &q, ActiveOnly: true,
 	}
 
 	findingsQuery, findingsArgs := buildFindingsQuery(

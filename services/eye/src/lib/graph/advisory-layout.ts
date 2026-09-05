@@ -43,8 +43,14 @@ export function districtGrid(count: number, maxNodes: number): DistrictCell[] {
  * Build a scene from advisory groups rather than individual instances.
  * At instance granularity the live data puts 1028 columns into a slab occupying under
  * 10% of the viewport height; one node per advisory brings that to roughly half.
+ *
+ * `estimated` names the advisories a live event patched without the whole instance set
+ * behind it, so their counts are rendered as approximations rather than as the truth.
  */
-export function computeAdvisoryLayout(groups: AdvisoryGroup[]): GraphModel {
+export function computeAdvisoryLayout(
+	groups: AdvisoryGroup[],
+	estimated?: ReadonlySet<string>,
+): GraphModel {
 	const byEcosystem = new Map<string, AdvisoryGroup[]>();
 	for (const group of groups) {
 		const key = group.ecosystems[0] ?? NO_ECOSYSTEM;
@@ -76,7 +82,7 @@ export function computeAdvisoryLayout(groups: AdvisoryGroup[]): GraphModel {
 			nodes.set(group.advisory_id, {
 				id: group.advisory_id,
 				targetId: ecosystem,
-				targetName: summariseTargets(group),
+				targetName: summariseTargets(group, estimated?.has(group.advisory_id) ?? false),
 				packageName: group.package_names[0] ?? '(unknown package)',
 				packageVersion: summarisePackages(group),
 				ecosystem,
@@ -122,10 +128,14 @@ function sizeFromInstanceCount(count: number): number {
 	return Math.min(NODE_SIZE_MAX, NODE_SIZE_MIN + Math.sqrt(Math.max(0, count - 1)) * 0.5);
 }
 
-function summariseTargets(group: AdvisoryGroup): string {
+function summariseTargets(group: AdvisoryGroup, approximate: boolean): string {
 	const shown = group.target_names.slice(0, 2).join(', ');
 	const rest = group.target_count - Math.min(2, group.target_names.length);
-	return rest > 0 ? `${shown} +${rest} more (${group.target_count} targets)` : shown;
+	const count = `${approximate ? '~' : ''}${group.target_count}`;
+
+	if (rest > 0) return `${shown} +${rest} more (${count} targets)`;
+	// An approximated count has to stay visible even when the names alone would do.
+	return approximate ? `${shown} (${count} targets)` : shown;
 }
 
 function summarisePackages(group: AdvisoryGroup): string {

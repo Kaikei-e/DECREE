@@ -31,6 +31,19 @@ const VIEW_MODES: { value: ViewMode; label: string; icon: typeof Box; hint: stri
 /** Long enough to swallow a fast typist's inter-key gap, short enough to feel immediate. */
 const DEBOUNCE_MS = 300;
 
+// The DECREE Score is a weighted composite, so a tenth of a point is noise; these are
+// the stops where the active list actually collapses. 0 means the filter is off.
+const SCORE_THRESHOLDS: { value: number; label: string; hint: string }[] = [
+	{ value: 0, label: 'Any', hint: 'No DECREE Score floor' },
+	{ value: 4, label: '4+', hint: 'DECREE Score 4.0 and above' },
+	{ value: 5, label: '5+', hint: 'DECREE Score 5.0 and above' },
+	{ value: 6, label: '6+', hint: 'DECREE Score 6.0 and above' },
+	{ value: 7, label: '7+', hint: 'DECREE Score 7.0 and above' },
+];
+
+// The threshold group is not a form control, so its visible heading is bound by id.
+const scoreLabelId = $props.id();
+
 const totalCount = $derived(Object.values(severityCounts).reduce((sum, n) => sum + n, 0));
 
 let term = $state(untrack(() => query.q) ?? '');
@@ -108,6 +121,11 @@ function setMinEpss(e: Event) {
 		pendingEpss = null;
 		applyFilters({ ...query, minEpss: epss > 0 ? epss : undefined });
 	}, DEBOUNCE_MS);
+}
+
+/** Discrete and deliberate, so it applies on the click; only the dragged and typed controls debounce. */
+function setMinScore(value: number) {
+	applyFilters({ ...query, minScore: value > 0 ? value : undefined });
 }
 
 function toggleActiveOnly() {
@@ -196,6 +214,26 @@ function severityLabel(severity: string): string {
 				<span class="w-10 text-right font-mono text-xs text-hud-text">{(epss * 100).toFixed(0)}%</span>
 			</div>
 		</label>
+
+		<div class="space-y-1 text-xs text-hud-text-secondary">
+			<span class="hud-header" id={scoreLabelId}>Minimum DECREE Score</span>
+			<div
+				role="group"
+				aria-labelledby={scoreLabelId}
+				class="flex items-center gap-1 rounded-sm border border-hud-border-control bg-hud-surface p-1"
+			>
+				{#each SCORE_THRESHOLDS as threshold (threshold.value)}
+					<button
+						class="rounded-sm px-2.5 py-1.5 font-mono text-xs transition-colors {(query.minScore ?? 0) === threshold.value ? 'bg-hud-accent/15 text-hud-accent' : 'text-hud-text-secondary hover:text-hud-text'}"
+						aria-pressed={(query.minScore ?? 0) === threshold.value}
+						onclick={() => setMinScore(threshold.value)}
+						title={threshold.hint}
+					>
+						{threshold.label}
+					</button>
+				{/each}
+			</div>
+		</div>
 
 		<button
 			class="rounded-sm border px-3 py-2 font-mono text-xs uppercase tracking-[0.14em] transition-colors {query.activeOnly ? 'hud-border-active bg-hud-accent/10 text-hud-accent' : 'border-hud-border-control bg-hud-surface text-hud-text-secondary hover:text-hud-text'}"

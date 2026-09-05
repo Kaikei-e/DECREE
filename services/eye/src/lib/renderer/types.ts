@@ -32,3 +32,23 @@ export interface SceneRenderer {
 }
 
 export type RendererCapability = 'webgl2' | 'canvas2d';
+
+export type RendererChoice = '3d' | '2d';
+
+/**
+ * Why the 3D scene is not on screen. A blocked driver is permanent and a failed
+ * initialisation may not be, so the two never share wording.
+ */
+export type FallbackReason = 'webgl2-unavailable' | 'scene-init-failed';
+
+export interface RendererFallback {
+	reason: FallbackReason;
+	/** The underlying message, short enough for a tooltip; never a stack trace. */
+	detail: string;
+}
+
+/** What actually mounted, which is not always what was asked for. */
+export interface RendererStatus {
+	kind: RendererChoice;
+	fallback: RendererFallback | null;
+}

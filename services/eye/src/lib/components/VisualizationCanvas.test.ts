@@ -1,8 +1,21 @@
-import { cleanup, fireEvent, render } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CapabilityReport } from '$lib/renderer/capability';
+
+const capability = vi.hoisted(() => ({
+	report: { capability: 'canvas2d', reason: 'jsdom has no WebGL2.' } as CapabilityReport,
+}));
+
+vi.mock('$lib/renderer/capability', () => ({
+	detectCapability: async () => capability.report,
+	resetCapabilityCache: () => {},
+}));
+
 import type { GraphModel, GraphNode, Severity } from '$lib/graph/model';
 import { createEmptyGraph } from '$lib/graph/model';
 import { Canvas2DRenderer } from '$lib/renderer/canvas2d/Canvas2DRenderer';
+import { ThreeSceneRenderer } from '$lib/renderer/three/ThreeSceneRenderer';
+import type { RendererStatus } from '$lib/renderer/types';
 import VisualizationCanvas from './VisualizationCanvas.svelte';
 
 beforeAll(() => {
@@ -68,6 +81,7 @@ describe('VisualizationCanvas', () => {
 	let setCameraVelocity: ReturnType<typeof vi.spyOn>;
 
 	beforeEach(() => {
+		capability.report = { capability: 'canvas2d', reason: 'jsdom has no WebGL2.' };
 		setCameraVelocity = vi
 			.spyOn(Canvas2DRenderer.prototype, 'setCameraVelocity')
 			.mockImplementation(() => {});
@@ -204,6 +218,70 @@ describe('VisualizationCanvas', () => {
 
 		expect(getByRole('status').textContent?.trim()).toBe('');
 		expect(setCameraVelocity).not.toHaveBeenCalled();
+	});
+
+	describe('reporting the mounted renderer', () => {
+		async function lastStatus(overrides: Record<string, unknown> = {}) {
+			const onRendererReady = vi.fn();
+			const utils = render(VisualizationCanvas, {
+				props: baseProps({ onRendererReady, ...overrides }),
+			});
+			await waitFor(() => expect(onRendererReady).toHaveBeenCalled());
+			return {
+				...utils,
+				onRendererReady,
+				status: () => onRendererReady.mock.calls.at(-1)?.[0] as RendererStatus,
+			};
+		}
+
+		it('names the renderer that mounted, not the one requested', async () => {
+			const { status } = await lastStatus();
+			expect(status()).toEqual({ kind: '2d', fallback: null });
+		});
+
+		it('reports a fallback caused by missing WebGL2', async () => {
+			const { status } = await lastStatus({ rendererType: '3d' });
+			expect(status()).toEqual({
+				kind: '2d',
+				fallback: { reason: 'webgl2-unavailable', detail: 'jsdom has no WebGL2.' },
+			});
+		});
+
+		it('separates a 3D scene that failed to start from missing WebGL2', async () => {
+			capability.report = { capability: 'webgl2', reason: null };
+			vi.spyOn(console, 'warn').mockImplementation(() => {});
+			vi.spyOn(ThreeSceneRenderer.prototype, 'mount').mockImplementation(() => {
+				throw new Error('Error creating WebGL context.');
+			});
+
+			const { status } = await lastStatus({ rendererType: '3d' });
+
+			expect(status().kind).toBe('2d');
+			expect(status().fallback?.reason).toBe('scene-init-failed');
+			expect(status().fallback?.detail).toContain('Error creating WebGL context.');
+		});
+
+		it('reports again when the renderer is swapped', async () => {
+			const { onRendererReady, rerender } = await lastStatus();
+			expect(onRendererReady).toHaveBeenCalledTimes(1);
+
+			await rerender(baseProps({ onRendererReady, rendererType: '3d' }));
+			await waitFor(() => expect(onRendererReady).toHaveBeenCalledTimes(2));
+			expect(onRendererReady.mock.calls.at(-1)?.[0]).toMatchObject({ kind: '2d' });
+		});
+
+		it('describes the keys of the renderer that mounted, not the mode requested', async () => {
+			const { getByRole } = await lastStatus({ rendererType: '3d' });
+
+			const scene = getByRole('application', { name: '2D vulnerability graph' });
+			const describedBy = scene.getAttribute('aria-describedby');
+			const description = document.getElementById(describedBy as string)?.textContent ?? '';
+
+			expect(description).toContain('arrow keys pan');
+			expect(description).not.toContain('orbit');
+			expect(description).not.toContain('altitude');
+			expect(description).not.toContain('T for the top view');
+		});
 	});
 
 	describe('camera keys', () => {

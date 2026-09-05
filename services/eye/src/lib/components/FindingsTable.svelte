@@ -28,6 +28,8 @@ interface Props {
 	loading: boolean;
 	hasMore: boolean;
 	hasActiveFilters: boolean;
+	/** Advisories whose counts are the client's best effort while a live edit is reconciled. */
+	estimated?: ReadonlySet<string>;
 	onSort: (key: FindingSort) => void;
 	onSelect: (advisoryId: string) => void;
 	onLoadMore: () => void;
@@ -46,6 +48,7 @@ const {
 	onSelect,
 	onLoadMore,
 	onClearFilters,
+	estimated,
 }: Props = $props();
 
 interface Column {
@@ -246,6 +249,7 @@ const rowClass =
 				{#each groups as group, index (group.advisory_id)}
 					{@const selected = group.advisory_id === selectedAdvisoryId}
 					{@const hiddenTargets = group.target_count - group.target_names.length}
+					{@const approx = estimated?.has(group.advisory_id) ?? false}
 					<!-- svelte-ignore a11y_click_events_have_key_events -- the grid-level handler carries the keyboard equivalent for the focused cell -->
 					<div
 						role="row"
@@ -280,7 +284,12 @@ const rowClass =
 							{#if hiddenTargets > 0}
 								<span class="shrink-0 font-mono text-[10px] text-hud-text-muted" title="{hiddenTargets} more targets not listed">+{hiddenTargets} more</span>
 							{/if}
-							<span class="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-hud-text-secondary" title="{group.instance_count} vulnerable instances across {group.target_count} targets">{group.instance_count} inst</span>
+							<span
+								class="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-hud-text-secondary"
+								title={approx
+									? `About ${group.instance_count} instances across about ${group.target_count} targets. Reconciling with the server.`
+									: `${group.instance_count} vulnerable instances across ${group.target_count} targets`}
+							>{approx ? '~' : ''}{group.instance_count} inst</span>
 						</div>
 
 						<div role="gridcell" tabindex={tabIndexFor(index + 1, 4)} data-row={index + 1} data-col="4" class="{numericCellClass} text-hud-accent" title="DECREE Score {formatScore(group.max_decree_score)} of 10">

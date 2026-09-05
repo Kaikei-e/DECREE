@@ -34,6 +34,8 @@ export interface FindingFilterParams {
 	/** Case-sensitive exact match — send a value the facets endpoint returned, unmodified. */
 	ecosystem?: string;
 	min_epss?: number;
+	/** DECREE Score floor, 0-10 (ADR-0035). Findings with no score are excluded above 0. */
+	min_score?: number;
 	active_only?: boolean;
 	q?: string;
 	sort?: FindingSort;

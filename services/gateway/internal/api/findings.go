@@ -1,6 +1,7 @@
 package api
 
 import (
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -83,6 +84,17 @@ func parseFindingFilters(projectID uuid.UUID, q url.Values) (db.FindingFilters, 
 			f32 := float32(f)
 			filters.MinEPSS = &f32
 		}
+	}
+	if q.Has("min_score") {
+		// A risk floor that is silently ignored shows more findings than the
+		// caller asked to see, so an unusable value is an error, not a no-op.
+		f, err := strconv.ParseFloat(q.Get("min_score"), 32)
+		if err != nil || math.IsNaN(f) || f < 0 || f > db.MaxDecreeScore {
+			return filters, ErrBadRequest("invalid_min_score",
+				"min_score must be a number between 0 and "+strconv.Itoa(db.MaxDecreeScore))
+		}
+		f32 := float32(f)
+		filters.MinScore = &f32
 	}
 	if v := strings.TrimSpace(q.Get("q")); v != "" {
 		if utf8.RuneCountInString(v) > db.MaxSearchLength {

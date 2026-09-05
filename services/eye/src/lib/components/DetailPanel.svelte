@@ -13,6 +13,8 @@ interface Props {
 	error: string | null;
 	/** True below the desktop breakpoint, where the panel covers the page instead of pushing it. */
 	overlay: boolean;
+	/** True while this advisory's counts are the client's best effort, not the server's answer. */
+	advisoryEstimated?: boolean;
 	onSelectInstance: (instanceId: string) => void;
 	onBack: () => void;
 	onClose: () => void;
@@ -28,6 +30,7 @@ const {
 	onSelectInstance,
 	onBack,
 	onClose,
+	advisoryEstimated = false,
 }: Props = $props();
 
 const titleId = $props.id();
@@ -113,10 +116,12 @@ function formatEpss(value: number | undefined): string {
 	return `${percent >= 1 ? percent.toFixed(1) : percent.toFixed(2)}%`;
 }
 
-function reachCopy(group: AdvisoryGroup): string {
+function reachCopy(group: AdvisoryGroup, approximate: boolean): string {
 	const instanceWord = group.instance_count === 1 ? 'instance' : 'instances';
 	const targetWord = group.target_count === 1 ? 'target' : 'targets';
-	return `${group.instance_count} ${instanceWord} across ${group.target_count} ${targetWord}`;
+	const mark = approximate ? '~' : '';
+	const counts = `${mark}${group.instance_count} ${instanceWord} across ${mark}${group.target_count} ${targetWord}`;
+	return approximate ? `${counts} · reconciling with the server` : counts;
 }
 
 function rangeStatusCopy(status?: string): string {
@@ -313,7 +318,7 @@ function rangeStatusCopy(status?: string): string {
 					</div>
 				</dl>
 
-				<p class="text-sm text-hud-text">{reachCopy(advisory)}</p>
+				<p class="text-sm text-hud-text">{reachCopy(advisory, advisoryEstimated)}</p>
 
 				<div>
 					<h3 class="hud-header">Packages</h3>
