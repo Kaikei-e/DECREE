@@ -1,57 +1,51 @@
 <script lang="ts">
 import { untrack } from 'svelte';
-import { page } from '$app/state';
-import { getFindings } from '$lib/api/client';
+import { invalidateAll } from '$app/navigation';
 import { computeLayout } from '$lib/graph/layout';
 import { appState } from '$lib/state/app.svelte';
 import { sseManager } from '$lib/state/sse-manager.svelte';
 
 let { children, data } = $props();
 
-const projectId = $derived(page.params.projectId);
-
-// Initialize state from load data and connect SSE
+// The URL is the source of truth for filters, so every load result — the first one and
+// every one after a filter change — is applied the same way, and nothing here refetches.
 $effect(() => {
-	const id = projectId;
-	if (!id) return;
+	const { projectId, findings, targets } = data;
 
 	untrack(() => {
-		appState.selectedProjectId = id;
-		appState.targets = data.targets;
-		appState.findings = data.findings;
-		appState.graphModel = computeLayout(data.findings, data.targets);
-		sseManager.connect(id);
+		// Nothing here survives a project change, and the live stream is keyed off the id.
+		if (appState.selectedProjectId !== projectId) {
+			appState.reset();
+			appState.selectedProjectId = projectId;
+		}
+		appState.targets = targets;
+		appState.findings = findings;
+		// Instance-grained: this is what the live stream patches and what the risk plot's
+		// hover card reads. The 3D scene builds its own advisory-grained model.
+		appState.graphModel = computeLayout(findings, targets);
+		appState.error = null;
 	});
-
-	return () => {
-		sseManager.disconnect();
-	};
 });
 
-// Re-fetch findings when filters change
 $effect(() => {
-	const _severity = appState.filters.severity;
-	const _ecosystem = appState.filters.ecosystem;
-	const _minEpss = appState.filters.minEpss;
-	const _activeOnly = appState.filters.activeOnly;
-	const id = appState.selectedProjectId;
-	if (id) untrack(() => loadFindings(id));
+	const id = data.projectId;
+	if (!id) return;
+
+	untrack(() => sseManager.connect(id));
+	return () => sseManager.disconnect();
 });
 
-async function loadFindings(id: string) {
-	try {
-		const findingsRes = await getFindings(id, {
-			severity: appState.filters.severity,
-			ecosystem: appState.filters.ecosystem,
-			min_epss: appState.filters.minEpss,
-			active_only: appState.filters.activeOnly,
-		});
-		appState.findings = findingsRes.data;
-		appState.graphModel = computeLayout(findingsRes.data, appState.targets);
-	} catch (e) {
-		appState.error = e instanceof Error ? e.message : 'Failed to load findings';
-	}
-}
+// The stream patches the instance graph directly, but the advisory-grained scene and the
+// table are built from the loader's data, so a burst of events has to pull that again.
+// Coalesced, because a single scan emits one event per changed finding.
+const RELOAD_DEBOUNCE_MS = 5000;
+$effect(() => {
+	const eventId = sseManager.lastEventId;
+	if (!eventId) return;
+
+	const timer = setTimeout(() => invalidateAll(), RELOAD_DEBOUNCE_MS);
+	return () => clearTimeout(timer);
+});
 </script>
 
 {@render children()}

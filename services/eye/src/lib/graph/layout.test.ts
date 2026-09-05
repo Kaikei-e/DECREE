@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { Finding, Target } from '$lib/types/api';
-import { CLUSTER_SPACING, computeLayout, parseSeverity, Y_SCALE } from './layout';
+import {
+	CLUSTER_SPACING,
+	computeLayout,
+	EDGE_TYPE_ADVISORY,
+	EDGE_TYPE_PACKAGE,
+	JITTER_RANGE,
+	NODE_SIZE_MAX,
+	NODE_SIZE_MIN,
+	nodeSizeFromDegree,
+	parseSeverity,
+	resolveGridSlot,
+	Y_SCALE,
+} from './layout';
 import { SEVERITY_COLORS, type Severity } from './model';
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
@@ -112,7 +124,7 @@ describe('computeLayout', () => {
 	});
 
 	it('maps severity to correct color', () => {
-		const severities: Severity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'];
+		const severities: Severity[] = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
 		for (const sev of severities) {
 			const findings = [makeFinding({ instance_id: `n-${sev}`, severity: sev })];
 			const targets = [makeTarget()];
@@ -202,7 +214,7 @@ describe('parseSeverity', () => {
 		expect(parseSeverity('high')).toBe('HIGH');
 		expect(parseSeverity('medium')).toBe('MEDIUM');
 		expect(parseSeverity('low')).toBe('LOW');
-		expect(parseSeverity('info')).toBe('INFO');
+		expect(parseSeverity('info')).toBe('UNKNOWN');
 	});
 
 	it('normalizes mixed case', () => {
@@ -210,9 +222,144 @@ describe('parseSeverity', () => {
 		expect(parseSeverity('hIgH')).toBe('HIGH');
 	});
 
-	it('defaults to INFO for unknown values', () => {
-		expect(parseSeverity('unknown')).toBe('INFO');
-		expect(parseSeverity('')).toBe('INFO');
-		expect(parseSeverity(undefined)).toBe('INFO');
+	it('reports missing or unrecognised severity as UNKNOWN, never as a safe level', () => {
+		expect(parseSeverity('unknown')).toBe('UNKNOWN');
+		expect(parseSeverity('')).toBe('UNKNOWN');
+		expect(parseSeverity(undefined)).toBe('UNKNOWN');
+	});
+});
+
+describe('nodeSizeFromDegree', () => {
+	it('gives isolated nodes the minimum size', () => {
+		expect(nodeSizeFromDegree(0)).toBe(NODE_SIZE_MIN);
+	});
+
+	it('grows with connection count', () => {
+		expect(nodeSizeFromDegree(1)).toBeGreaterThan(nodeSizeFromDegree(0));
+		expect(nodeSizeFromDegree(4)).toBeGreaterThan(nodeSizeFromDegree(1));
+	});
+
+	it('clamps at the maximum size', () => {
+		expect(nodeSizeFromDegree(100)).toBe(NODE_SIZE_MAX);
+	});
+});
+
+describe('resolveGridSlot', () => {
+	it('keeps the node inside its assigned grid slot', () => {
+		const used = new Set<string>();
+		const first = resolveGridSlot(10, 4, 0, 'seed-a', used);
+		expect(Math.abs(first.x - 10)).toBeLessThanOrEqual(JITTER_RANGE);
+		expect(Math.abs(first.z - 4)).toBeLessThanOrEqual(JITTER_RANGE);
+	});
+
+	it('perturbs the assigned slot on collision instead of collapsing to the origin', () => {
+		const used = new Set<string>();
+		resolveGridSlot(10, 4, 0, 'seed-a', used);
+		// Same seed and slot: the first candidate is already taken, so it must retry in place.
+		const second = resolveGridSlot(10, 4, 0, 'seed-a', used);
+		expect(Math.abs(second.x - 10)).toBeLessThanOrEqual(JITTER_RANGE);
+		expect(Math.abs(second.z - 4)).toBeLessThanOrEqual(JITTER_RANGE);
+	});
+
+	it('never hands out the same position twice', () => {
+		const used = new Set<string>();
+		const a = resolveGridSlot(10, 4, 0, 'seed-a', used);
+		const b = resolveGridSlot(10, 4, 0, 'seed-a', used);
+		expect(`${a.x},${a.z}`).not.toBe(`${b.x},${b.z}`);
+	});
+});
+
+describe('computeLayout edges', () => {
+	it('connects findings that share a package across targets', () => {
+		const findings = [
+			makeFinding({ instance_id: 'a', target_id: 't1', decree_score: 9 }),
+			makeFinding({ instance_id: 'b', target_id: 't2', decree_score: 5, advisory_id: 'GHSA-9' }),
+			makeFinding({ instance_id: 'c', target_id: 't3', decree_score: 1, advisory_id: 'GHSA-8' }),
+		];
+		const targets = [makeTarget({ id: 't1' }), makeTarget({ id: 't2' }), makeTarget({ id: 't3' })];
+		const graph = computeLayout(findings, targets);
+
+		expect(graph.edges).toHaveLength(2);
+		for (const edge of graph.edges) {
+			expect(edge.depType).toBe(EDGE_TYPE_PACKAGE);
+			// Highest score becomes the cohort hub
+			expect(edge.source).toBe('a');
+		}
+	});
+
+	it('connects findings that share an advisory when the package differs', () => {
+		const findings = [
+			makeFinding({ instance_id: 'a', target_id: 't1', package_name: 'left', decree_score: 9 }),
+			makeFinding({ instance_id: 'b', target_id: 't2', package_name: 'right', decree_score: 2 }),
+		];
+		const targets = [makeTarget({ id: 't1' }), makeTarget({ id: 't2' })];
+		const graph = computeLayout(findings, targets);
+
+		expect(graph.edges).toHaveLength(1);
+		expect(graph.edges[0]?.depType).toBe(EDGE_TYPE_ADVISORY);
+	});
+
+	it('does not duplicate an edge when a pair shares both package and advisory', () => {
+		const findings = [
+			makeFinding({ instance_id: 'a', target_id: 't1', decree_score: 9 }),
+			makeFinding({ instance_id: 'b', target_id: 't2', decree_score: 2 }),
+		];
+		const targets = [makeTarget({ id: 't1' }), makeTarget({ id: 't2' })];
+		const graph = computeLayout(findings, targets);
+
+		expect(graph.edges).toHaveLength(1);
+		expect(graph.edges[0]?.depType).toBe(EDGE_TYPE_PACKAGE);
+	});
+
+	it('emits no edges when nothing is shared', () => {
+		const findings = [
+			makeFinding({ instance_id: 'a', package_name: 'one', advisory_id: 'GHSA-1' }),
+			makeFinding({ instance_id: 'b', package_name: 'two', advisory_id: 'GHSA-2' }),
+		];
+		const graph = computeLayout(findings, [makeTarget()]);
+		expect(graph.edges).toHaveLength(0);
+	});
+
+	it('keeps the cohort star linear rather than a clique', () => {
+		const findings = Array.from({ length: 10 }, (_, i) =>
+			makeFinding({ instance_id: `n${i}`, advisory_id: `GHSA-${i}`, decree_score: 10 - i }),
+		);
+		const graph = computeLayout(findings, [makeTarget()]);
+		expect(graph.edges).toHaveLength(9);
+	});
+
+	it('only references node ids that exist in the graph', () => {
+		const findings = Array.from({ length: 6 }, (_, i) =>
+			makeFinding({ instance_id: `n${i}`, decree_score: i }),
+		);
+		const graph = computeLayout(findings, [makeTarget()]);
+		for (const edge of graph.edges) {
+			expect(graph.nodes.has(edge.source)).toBe(true);
+			expect(graph.nodes.has(edge.target)).toBe(true);
+			expect(edge.source).not.toBe(edge.target);
+		}
+	});
+
+	it('derives visual.size from the connection count', () => {
+		const findings = [
+			makeFinding({ instance_id: 'hub', decree_score: 9 }),
+			makeFinding({ instance_id: 'spoke-1', decree_score: 5 }),
+			makeFinding({ instance_id: 'spoke-2', decree_score: 4 }),
+			makeFinding({
+				instance_id: 'lonely',
+				package_name: 'other',
+				advisory_id: 'GHSA-lonely',
+				decree_score: 3,
+			}),
+		];
+		const graph = computeLayout(findings, [makeTarget()]);
+
+		const hub = graph.nodes.get('hub');
+		const spoke = graph.nodes.get('spoke-1');
+		const lonely = graph.nodes.get('lonely');
+
+		expect(lonely?.visual.size).toBe(NODE_SIZE_MIN);
+		expect(spoke?.visual.size).toBeGreaterThan(lonely?.visual.size ?? 0);
+		expect(hub?.visual.size).toBeGreaterThan(spoke?.visual.size ?? 0);
 	});
 });

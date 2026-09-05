@@ -40,19 +40,74 @@ type Finding struct {
 	LastObservedAt *time.Time `json:"last_observed_at,omitempty"`
 }
 
-type FindingParams struct {
+// FindingFilters narrows the instance set. Both the findings list and the
+// advisory grouping apply it to the same relation, so grouped counts always
+// describe exactly the rows the findings list would return.
+type FindingFilters struct {
 	ProjectID  uuid.UUID
 	Severity   *string
 	Ecosystem  *string
 	MinEPSS    *float32
+	Advisory   *string
+	Query      *string
 	ActiveOnly bool
-	Cursor     *FindingCursor
-	Limit      int
+}
+
+type FindingParams struct {
+	FindingFilters
+	Sort     SortKey
+	SortDesc bool
+	Cursor   *FindingCursor
+	Limit    int
 }
 
 type FindingCursor struct {
-	Score      float32
+	Sort       SortKey
+	Desc       bool
+	Value      any
 	InstanceID uuid.UUID
+}
+
+// AdvisoryGroup collapses every instance of one advisory into a single row.
+// The name lists are capped at AdvisoryNameCap; the counts are not, so the UI
+// can render the remainder as "+N more".
+type AdvisoryGroup struct {
+	AdvisoryID      string     `json:"advisory_id"`
+	Severity        *string    `json:"severity,omitempty"`
+	MaxDecreeScore  *float32   `json:"max_decree_score,omitempty"`
+	EPSSScore       *float32   `json:"epss_score,omitempty"`
+	CVSSScore       *float32   `json:"cvss_score,omitempty"`
+	InstanceCount   int64      `json:"instance_count"`
+	TargetCount     int64      `json:"target_count"`
+	TargetNames     []string   `json:"target_names"`
+	PackageNames    []string   `json:"package_names"`
+	Ecosystems      []string   `json:"ecosystems"`
+	IsActive        bool       `json:"is_active"`
+	FirstObservedAt *time.Time `json:"first_observed_at,omitempty"`
+	LastObservedAt  *time.Time `json:"last_observed_at,omitempty"`
+}
+
+type AdvisoryParams struct {
+	FindingFilters
+	Sort     SortKey
+	SortDesc bool
+	Cursor   *AdvisoryCursor
+	Limit    int
+}
+
+type AdvisoryCursor struct {
+	Sort       SortKey
+	Desc       bool
+	Value      any
+	AdvisoryID string
+}
+
+// Facets are the filter options for a project, computed independently of the
+// caller's current severity/ecosystem/search filters.
+type Facets struct {
+	Ecosystems     []string       `json:"ecosystems"`
+	SeverityCounts map[string]int `json:"severity_counts"`
+	Total          int            `json:"total"`
 }
 
 type FindingDetail struct {

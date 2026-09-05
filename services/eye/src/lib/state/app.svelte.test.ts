@@ -7,25 +7,8 @@ describe('appState', () => {
 		expect(appState.selectedProjectId).toBeNull();
 		expect(appState.targets).toEqual([]);
 		expect(appState.findings).toEqual([]);
-		expect(appState.selectedNodeId).toBeNull();
-		expect(appState.selectedFindingDetail).toBeNull();
-		expect(appState.filters).toEqual({ activeOnly: true });
-		expect(appState.rendererType).toBe('3d');
+		expect(appState.graphModel.nodes.size).toBe(0);
 		expect(appState.error).toBeNull();
-	});
-
-	it('sets filters', () => {
-		appState.reset();
-		appState.filters = { severity: 'HIGH', activeOnly: false };
-		expect(appState.filters.severity).toBe('HIGH');
-		expect(appState.filters.activeOnly).toBe(false);
-	});
-
-	it('toggles renderer type', () => {
-		appState.reset();
-		expect(appState.rendererType).toBe('3d');
-		appState.rendererType = '2d';
-		expect(appState.rendererType).toBe('2d');
 	});
 
 	it('tracks error state', () => {
@@ -37,12 +20,31 @@ describe('appState', () => {
 	it('reset clears all state', () => {
 		appState.selectedProjectId = '1';
 		appState.error = 'err';
-		appState.rendererType = '2d';
+		appState.findings = [
+			{
+				instance_id: 'inst-1',
+				target_id: 't1',
+				target_name: 'alt',
+				package_name: 'lodash',
+				package_version: '4.17.0',
+				ecosystem: 'npm',
+				advisory_id: 'CVE-2026-0001',
+				is_active: true,
+			},
+		];
 
 		appState.reset();
 
 		expect(appState.selectedProjectId).toBeNull();
 		expect(appState.error).toBeNull();
-		expect(appState.rendererType).toBe('3d');
+		expect(appState.findings).toEqual([]);
+	});
+
+	it('no longer mirrors the filters or the view mode, which live in the URL', () => {
+		const keys = Object.keys(appState);
+		expect(keys).not.toContain('filters');
+		expect(keys).not.toContain('rendererType');
+		expect(keys).not.toContain('selectedNodeId');
+		expect(keys).not.toContain('selectedFindingDetail');
 	});
 });

@@ -67,13 +67,31 @@ func parseLimit(r *http.Request, defaultLimit, maxLimit int) int {
 	return n
 }
 
-// Finding cursor: "score|instance_id" base64-encoded
-func encodeFindingCursor(score float32, id uuid.UUID) string {
-	raw := fmt.Sprintf("%v|%s", score, id.String())
+// Finding cursor: "v1|<sort key>|<direction>|<instance id>|<sort value>",
+// base64url-encoded. The sort value comes last so text values may contain "|".
+// Sort key and direction are embedded so a cursor minted under a different sort
+// is rejected instead of silently paging through the wrong key space.
+const cursorVersion = "v1"
+
+func encodeFindingCursor(key db.SortKey, desc bool, f db.Finding) string {
+	raw := strings.Join([]string{
+		cursorVersion,
+		string(key),
+		sortDirection(desc),
+		f.InstanceID.String(),
+		db.FormatSortValue(key, f),
+	}, "|")
 	return base64.URLEncoding.EncodeToString([]byte(raw))
 }
 
-func parseFindingCursor(s string) (*db.FindingCursor, error) {
+func sortDirection(desc bool) string {
+	if desc {
+		return "desc"
+	}
+	return "asc"
+}
+
+func parseFindingCursor(s string, key db.SortKey, desc bool) (*db.FindingCursor, error) {
 	if s == "" {
 		return nil, nil
 	}
@@ -81,19 +99,72 @@ func parseFindingCursor(s string) (*db.FindingCursor, error) {
 	if err != nil {
 		return nil, ErrBadRequest("invalid_cursor", "invalid cursor encoding")
 	}
-	parts := strings.SplitN(string(raw), "|", 2)
-	if len(parts) != 2 {
+	parts := strings.SplitN(string(raw), "|", 5)
+	if len(parts) != 5 || parts[0] != cursorVersion {
 		return nil, ErrBadRequest("invalid_cursor", "invalid cursor format")
 	}
-	score, err := strconv.ParseFloat(parts[0], 32)
-	if err != nil {
-		return nil, ErrBadRequest("invalid_cursor", "invalid cursor score")
+	if parts[1] != string(key) || parts[2] != sortDirection(desc) {
+		return nil, ErrBadRequest("cursor_sort_mismatch",
+			"cursor was issued for a different sort order; restart pagination without a cursor")
 	}
-	id, err := uuid.Parse(parts[1])
+	id, err := uuid.Parse(parts[3])
 	if err != nil {
 		return nil, ErrBadRequest("invalid_cursor", "invalid cursor id")
 	}
-	return &db.FindingCursor{Score: float32(score), InstanceID: id}, nil
+	value, err := db.ParseSortValue(key, parts[4])
+	if err != nil {
+		return nil, ErrBadRequest("invalid_cursor", "invalid cursor value")
+	}
+	return &db.FindingCursor{Sort: key, Desc: desc, Value: value, InstanceID: id}, nil
+}
+
+// Advisory cursor: "v1|<sort key>|<direction>|<sort value>|<advisory id>",
+// base64url-encoded. The advisory id is last because it is free-form text; for
+// sort=advisory it is also the sort value, so the value segment stays empty.
+func encodeAdvisoryCursor(key db.SortKey, desc bool, g db.AdvisoryGroup) string {
+	value := db.FormatAdvisorySortValue(key, g)
+	if key == db.SortAdvisory {
+		value = ""
+	}
+	raw := strings.Join([]string{
+		cursorVersion,
+		string(key),
+		sortDirection(desc),
+		value,
+		g.AdvisoryID,
+	}, "|")
+	return base64.URLEncoding.EncodeToString([]byte(raw))
+}
+
+func parseAdvisoryCursor(s string, key db.SortKey, desc bool) (*db.AdvisoryCursor, error) {
+	if s == "" {
+		return nil, nil
+	}
+	raw, err := base64.URLEncoding.DecodeString(s)
+	if err != nil {
+		return nil, ErrBadRequest("invalid_cursor", "invalid cursor encoding")
+	}
+	parts := strings.SplitN(string(raw), "|", 5)
+	if len(parts) != 5 || parts[0] != cursorVersion {
+		return nil, ErrBadRequest("invalid_cursor", "invalid cursor format")
+	}
+	if parts[1] != string(key) || parts[2] != sortDirection(desc) {
+		return nil, ErrBadRequest("cursor_sort_mismatch",
+			"cursor was issued for a different sort order; restart pagination without a cursor")
+	}
+	advisoryID := parts[4]
+	if advisoryID == "" {
+		return nil, ErrBadRequest("invalid_cursor", "invalid cursor id")
+	}
+	rawValue := parts[3]
+	if key == db.SortAdvisory {
+		rawValue = advisoryID
+	}
+	value, err := db.ParseAdvisorySortValue(key, rawValue)
+	if err != nil {
+		return nil, ErrBadRequest("invalid_cursor", "invalid cursor value")
+	}
+	return &db.AdvisoryCursor{Sort: key, Desc: desc, Value: value, AdvisoryID: advisoryID}, nil
 }
 
 // Timeline cursor: "occurred_at|id" base64-encoded

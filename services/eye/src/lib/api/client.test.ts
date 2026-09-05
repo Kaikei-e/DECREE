@@ -6,8 +6,13 @@ vi.mock('$env/dynamic/public', () => ({
 }));
 
 import {
+	fetchAllAdvisories,
+	fetchAllFindings,
+	getAdvisories,
+	getFacets,
 	getFindingDetail,
 	getFindings,
+	getProject,
 	getProjects,
 	getTargets,
 	getTimeline,
@@ -123,6 +128,130 @@ describe('api client functions', () => {
 		expect(url).toContain('/api/projects/proj-1/timeline?');
 		expect(url).toContain('target_id=t-1');
 		expect(url).toContain('event_type=observed');
+	});
+
+	it('getFindings passes sort, order and q through', async () => {
+		fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [], has_more: false }));
+		await getFindings('p1', { sort: 'severity', order: 'asc', q: 'log4j' });
+		expect(fetchSpy).toHaveBeenCalledWith(
+			`${BASE}/api/projects/p1/findings?sort=severity&order=asc&q=log4j`,
+		);
+	});
+
+	it('getFindings percent-encodes a search term with special characters', async () => {
+		fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [], has_more: false }));
+		await getFindings('p1', { q: 'a b&c' });
+		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/projects/p1/findings?q=a%20b%26c`);
+	});
+
+	it('getProject calls the single-project endpoint', async () => {
+		fetchSpy.mockResolvedValueOnce(
+			jsonResponse({ data: { id: 'p1', name: 'helios', created_at: '' } }),
+		);
+		const result = await getProject('p1');
+		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/projects/p1`);
+		expect(result.name).toBe('helios');
+	});
+
+	it('getFacets returns the unfiltered facet set', async () => {
+		fetchSpy.mockResolvedValueOnce(
+			jsonResponse({
+				data: {
+					ecosystems: ['Go', 'npm'],
+					severity_counts: { critical: 47, high: 163, medium: 383, low: 478, unknown: 129 },
+					total: 1200,
+				},
+			}),
+		);
+		const result = await getFacets('p1', true);
+		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/projects/p1/facets?active_only=true`);
+		expect(result.ecosystems).toEqual(['Go', 'npm']);
+		expect(result.severity_counts.critical).toBe(47);
+	});
+
+	it('fetchAllFindings follows next_cursor until the server runs out', async () => {
+		fetchSpy
+			.mockResolvedValueOnce(
+				jsonResponse({ data: [{ instance_id: 'a' }], next_cursor: 'c1', has_more: true }),
+			)
+			.mockResolvedValueOnce(
+				jsonResponse({ data: [{ instance_id: 'b' }], next_cursor: 'c2', has_more: true }),
+			)
+			.mockResolvedValueOnce(jsonResponse({ data: [{ instance_id: 'c' }], has_more: false }));
+
+		const result = await fetchAllFindings('p1', { sort: 'severity' });
+
+		expect(result.data.map((f) => f.instance_id)).toEqual(['a', 'b', 'c']);
+		expect(result.truncated).toBe(false);
+		expect(fetchSpy).toHaveBeenCalledTimes(3);
+		expect(fetchSpy.mock.calls[1]?.[0]).toContain('cursor=c1');
+		expect(fetchSpy.mock.calls[2]?.[0]).toContain('cursor=c2');
+	});
+
+	it('fetchAllFindings stops at the cap and reports truncation', async () => {
+		// A Response body can only be read once, so each call needs a fresh one.
+		fetchSpy.mockImplementation(() =>
+			Promise.resolve(
+				jsonResponse({
+					data: [{ instance_id: 'x' }, { instance_id: 'y' }],
+					next_cursor: 'c',
+					has_more: true,
+				}),
+			),
+		);
+
+		const result = await fetchAllFindings('p1', {}, 3);
+
+		expect(result.data).toHaveLength(4);
+		expect(result.truncated).toBe(true);
+		expect(fetchSpy).toHaveBeenCalledTimes(2);
+	});
+
+	it('fetchAllFindings stops if the server keeps claiming more but returns nothing', async () => {
+		fetchSpy.mockImplementation(() =>
+			Promise.resolve(jsonResponse({ data: [], next_cursor: 'c', has_more: true })),
+		);
+
+		const result = await fetchAllFindings('p1', {}, 100);
+
+		expect(result.data).toEqual([]);
+		expect(fetchSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it('getAdvisories passes the shared filter set through', async () => {
+		fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [], has_more: false }));
+		await getAdvisories('p1', { severity: 'CRITICAL', sort: 'instance_count', limit: 25 });
+		expect(fetchSpy).toHaveBeenCalledWith(
+			`${BASE}/api/projects/p1/advisories?severity=CRITICAL&sort=instance_count&limit=25`,
+		);
+	});
+
+	it('getAdvisories keeps the paged envelope intact', async () => {
+		fetchSpy.mockResolvedValueOnce(
+			jsonResponse({
+				data: [{ advisory_id: 'CVE-2021-44228', instance_count: 9, target_count: 3 }],
+				next_cursor: 'c1',
+				has_more: true,
+			}),
+		);
+		const page = await getAdvisories('p1');
+		expect(page.has_more).toBe(true);
+		expect(page.next_cursor).toBe('c1');
+		expect(page.data[0]?.advisory_id).toBe('CVE-2021-44228');
+	});
+
+	it('fetchAllAdvisories walks the cursor the same way findings do', async () => {
+		fetchSpy
+			.mockResolvedValueOnce(
+				jsonResponse({ data: [{ advisory_id: 'a' }], next_cursor: 'c1', has_more: true }),
+			)
+			.mockResolvedValueOnce(jsonResponse({ data: [{ advisory_id: 'b' }], has_more: false }));
+
+		const result = await fetchAllAdvisories('p1', { sort: 'instance_count' });
+
+		expect(result.data.map((a) => a.advisory_id)).toEqual(['a', 'b']);
+		expect(result.truncated).toBe(false);
+		expect(fetchSpy.mock.calls[1]?.[0]).toContain('cursor=c1');
 	});
 
 	it('throws ApiError on non-ok response', async () => {

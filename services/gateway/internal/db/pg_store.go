@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -55,6 +56,15 @@ func scanFinding(row pgx.CollectableRow) (Finding, error) {
 	return f, err
 }
 
+// scanAdvisoryGroup scans a single AdvisoryGroup row.
+func scanAdvisoryGroup(row pgx.CollectableRow) (AdvisoryGroup, error) {
+	var g AdvisoryGroup
+	err := row.Scan(&g.AdvisoryID, &g.Severity, &g.MaxDecreeScore, &g.EPSSScore, &g.CVSSScore,
+		&g.InstanceCount, &g.TargetCount, &g.TargetNames, &g.PackageNames, &g.Ecosystems,
+		&g.IsActive, &g.FirstObservedAt, &g.LastObservedAt)
+	return g, err
+}
+
 // scanTimelineEvent scans a single TimelineEvent row.
 func scanTimelineEvent(row pgx.CollectableRow) (TimelineEvent, error) {
 	var e TimelineEvent
@@ -77,6 +87,20 @@ func (s *PgStore) ListProjects(ctx context.Context) ([]Project, error) {
 	return orEmpty(projects), nil
 }
 
+func (s *PgStore) GetProject(ctx context.Context, projectID uuid.UUID) (*Project, error) {
+	var p Project
+	err := s.pool.QueryRow(ctx,
+		`SELECT id, name, created_at FROM projects WHERE id = $1`, projectID).
+		Scan(&p.ID, &p.Name, &p.CreatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get project: %w", err)
+	}
+	return &p, nil
+}
+
 func (s *PgStore) ListTargets(ctx context.Context, projectID uuid.UUID) ([]Target, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT id, project_id, name, target_type, source_ref, branch, subpath, exposure_class, created_at
@@ -92,60 +116,7 @@ func (s *PgStore) ListTargets(ctx context.Context, projectID uuid.UUID) ([]Targe
 }
 
 func (s *PgStore) ListFindings(ctx context.Context, params FindingParams) ([]Finding, bool, error) {
-	fetchLimit := params.Limit + 1
-
-	var conditions []string
-	var args []any
-	argN := 1
-
-	conditions = append(conditions, fmt.Sprintf("t.project_id = $%d", argN))
-	args = append(args, params.ProjectID)
-	argN++
-
-	if params.ActiveOnly {
-		conditions = append(conditions, "cfs.is_active = true")
-	}
-	if params.Severity != nil {
-		conditions = append(conditions, fmt.Sprintf("cfs.last_severity = $%d", argN))
-		args = append(args, *params.Severity)
-		argN++
-	}
-	if params.Ecosystem != nil {
-		conditions = append(conditions, fmt.Sprintf("vi.ecosystem = $%d", argN))
-		args = append(args, *params.Ecosystem)
-		argN++
-	}
-	if params.MinEPSS != nil {
-		conditions = append(conditions, fmt.Sprintf("COALESCE(epss.epss_score, vo.epss_score) >= $%d", argN))
-		args = append(args, *params.MinEPSS)
-		argN++
-	}
-	if params.Cursor != nil {
-		conditions = append(conditions, fmt.Sprintf(
-			"(COALESCE(cfs.last_score, 0), vi.id) < ($%d, $%d)", argN, argN+1))
-		args = append(args, params.Cursor.Score, params.Cursor.InstanceID)
-		argN += 2
-	}
-
-	where := strings.Join(conditions, " AND ")
-
-	query := fmt.Sprintf(`
-		SELECT vi.id, vi.target_id, t.name, vi.package_name, vi.package_version,
-		       vi.ecosystem, vi.advisory_id, cfs.last_severity, cfs.last_score,
-		       COALESCE(epss.epss_score, vo.epss_score), vo.cvss_score, cfs.is_active, cfs.last_observed_at
-		FROM current_finding_status cfs
-		JOIN vulnerability_instances vi ON vi.id = cfs.instance_id
-		JOIN targets t ON t.id = vi.target_id
-		LEFT JOIN LATERAL (
-			SELECT epss_score, cvss_score FROM vulnerability_observations
-			WHERE instance_id = vi.id ORDER BY observed_at DESC LIMIT 1
-		) vo ON true
-%s
-		WHERE %s
-		ORDER BY COALESCE(cfs.last_score, 0) DESC, vi.id
-		LIMIT $%d
-	`, latestEpssJoin, where, argN)
-	args = append(args, fetchLimit)
+	query, args := buildFindingsQuery(params, findingsFrom)
 
 	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -161,6 +132,25 @@ func (s *PgStore) ListFindings(ctx context.Context, params FindingParams) ([]Fin
 		findings = findings[:params.Limit]
 	}
 	return orEmpty(findings), hasMore, nil
+}
+
+func (s *PgStore) ListAdvisories(ctx context.Context, params AdvisoryParams) ([]AdvisoryGroup, bool, error) {
+	query, args := buildAdvisoriesQuery(params, advisoriesFrom)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, false, fmt.Errorf("list advisories: %w", err)
+	}
+	groups, err := pgx.CollectRows(rows, scanAdvisoryGroup)
+	if err != nil {
+		return nil, false, fmt.Errorf("list advisories: %w", err)
+	}
+
+	hasMore := len(groups) > params.Limit
+	if hasMore {
+		groups = groups[:params.Limit]
+	}
+	return orEmpty(groups), hasMore, nil
 }
 
 func (s *PgStore) GetFindingDetail(ctx context.Context, instanceID uuid.UUID) (*FindingDetail, error) {
@@ -410,7 +400,7 @@ func (s *PgStore) ListTimeline(ctx context.Context, params TimelineParams) ([]Ti
 
 	query := fmt.Sprintf(`
 		%s
-		ORDER BY occurred_at DESC, id
+		ORDER BY occurred_at DESC, id DESC
 		LIMIT $%d
 	`, strings.Join(parts, " UNION ALL "), argN)
 	args = append(args, fetchLimit)
@@ -429,4 +419,60 @@ func (s *PgStore) ListTimeline(ctx context.Context, params TimelineParams) ([]Ti
 		events = events[:params.Limit]
 	}
 	return orEmpty(events), hasMore, nil
+}
+
+// canonicalSeverities is the fixed key space of the severity facet; anything the
+// projection stores outside this set is bucketed into "unknown".
+var canonicalSeverities = []string{"critical", "high", "medium", "low", "unknown"}
+
+func (s *PgStore) GetFindingFacets(ctx context.Context, projectID uuid.UUID, activeOnly bool) (*Facets, error) {
+	where := "t.project_id = $1"
+	if activeOnly {
+		where += " AND cfs.is_active = true"
+	}
+
+	rows, err := s.pool.Query(ctx, fmt.Sprintf(`
+		SELECT vi.ecosystem, lower(cfs.last_severity), count(*)
+		FROM current_finding_status cfs
+		JOIN vulnerability_instances vi ON vi.id = cfs.instance_id
+		JOIN targets t ON t.id = vi.target_id
+		WHERE %s
+		GROUP BY 1, 2
+	`, where), projectID)
+	if err != nil {
+		return nil, fmt.Errorf("get facets: %w", err)
+	}
+	defer rows.Close()
+
+	facets := &Facets{Ecosystems: []string{}, SeverityCounts: map[string]int{}}
+	for _, sev := range canonicalSeverities {
+		facets.SeverityCounts[sev] = 0
+	}
+
+	seen := map[string]bool{}
+	for rows.Next() {
+		var ecosystem string
+		var severity *string
+		var count int
+		if err := rows.Scan(&ecosystem, &severity, &count); err != nil {
+			return nil, fmt.Errorf("get facets: %w", err)
+		}
+		if !seen[ecosystem] {
+			seen[ecosystem] = true
+			facets.Ecosystems = append(facets.Ecosystems, ecosystem)
+		}
+		key := "unknown"
+		if severity != nil {
+			if _, ok := facets.SeverityCounts[*severity]; ok {
+				key = *severity
+			}
+		}
+		facets.SeverityCounts[key] += count
+		facets.Total += count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("get facets: %w", err)
+	}
+	sort.Strings(facets.Ecosystems)
+	return facets, nil
 }

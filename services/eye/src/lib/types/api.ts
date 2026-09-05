@@ -69,6 +69,28 @@ export interface DependencyEdge {
 	dep_type: string;
 }
 
+/**
+ * Payload published by the oracle diff engine on the `finding_changed` stream.
+ * Deliberately narrower than `Finding`: it carries no cvss_score and no last_observed_at.
+ */
+export interface FindingChangedEvent {
+	type: string;
+	project_id: string;
+	target_id: string;
+	target_name: string;
+	scan_id: string;
+	instance_id: string;
+	advisory_id: string;
+	package_name: string;
+	package_version: string;
+	ecosystem: string;
+	severity?: string;
+	decree_score?: number;
+	epss_score?: number;
+	is_active: boolean;
+	has_exploit: boolean;
+}
+
 export interface TimelineEvent {
 	id: string;
 	instance_id: string;
@@ -79,6 +101,33 @@ export interface TimelineEvent {
 	package_name?: string;
 	severity?: string;
 	decree_score?: number;
+}
+
+/**
+ * One row per advisory, aggregated over its instances by the gateway.
+ * Absent values are omitted from the JSON rather than sent as null.
+ */
+export interface AdvisoryGroup {
+	advisory_id: string;
+	severity?: string;
+	max_decree_score?: number;
+	epss_score?: number;
+	cvss_score?: number;
+	instance_count: number;
+	target_count: number;
+	/** Capped at 5 by the gateway; compare against target_count to know if more exist. */
+	target_names: string[];
+	package_names: string[];
+	ecosystems: string[];
+	is_active: boolean;
+	first_observed_at?: string;
+	last_observed_at?: string;
+}
+
+export interface Facets {
+	ecosystems: string[];
+	severity_counts: Record<string, number>;
+	total: number;
 }
 
 export interface PagedResponse<T> {

@@ -15,15 +15,22 @@ import (
 
 // mockStore implements db.Store for testing.
 type mockStore struct {
-	projects      []db.Project
-	targets       []db.Target
-	findings      []db.Finding
-	findingsMore  bool
-	findingDetail *db.FindingDetail
-	topRisks      []db.Finding
-	timeline      []db.TimelineEvent
-	timelineMore  bool
-	err           error
+	projects       []db.Project
+	project        *db.Project
+	targets        []db.Target
+	findings       []db.Finding
+	findingsMore   bool
+	findingParams  db.FindingParams
+	advisories     []db.AdvisoryGroup
+	advisoriesMore bool
+	advisoryParams db.AdvisoryParams
+	facets         *db.Facets
+	facetsActive   bool
+	findingDetail  *db.FindingDetail
+	topRisks       []db.Finding
+	timeline       []db.TimelineEvent
+	timelineMore   bool
+	err            error
 }
 
 func (m *mockStore) ListProjects(ctx context.Context) ([]db.Project, error) {
@@ -32,8 +39,20 @@ func (m *mockStore) ListProjects(ctx context.Context) ([]db.Project, error) {
 func (m *mockStore) ListTargets(ctx context.Context, projectID uuid.UUID) ([]db.Target, error) {
 	return m.targets, m.err
 }
+func (m *mockStore) GetProject(ctx context.Context, projectID uuid.UUID) (*db.Project, error) {
+	return m.project, m.err
+}
 func (m *mockStore) ListFindings(ctx context.Context, params db.FindingParams) ([]db.Finding, bool, error) {
+	m.findingParams = params
 	return m.findings, m.findingsMore, m.err
+}
+func (m *mockStore) ListAdvisories(ctx context.Context, params db.AdvisoryParams) ([]db.AdvisoryGroup, bool, error) {
+	m.advisoryParams = params
+	return m.advisories, m.advisoriesMore, m.err
+}
+func (m *mockStore) GetFindingFacets(ctx context.Context, projectID uuid.UUID, activeOnly bool) (*db.Facets, error) {
+	m.facetsActive = activeOnly
+	return m.facets, m.err
 }
 func (m *mockStore) GetFindingDetail(ctx context.Context, instanceID uuid.UUID) (*db.FindingDetail, error) {
 	return m.findingDetail, m.err

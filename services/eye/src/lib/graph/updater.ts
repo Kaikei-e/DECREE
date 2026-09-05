@@ -3,12 +3,34 @@ import { computeLayout, parseSeverity } from './layout';
 import { type GraphModel, SEVERITY_COLORS } from './model';
 
 /**
+ * The fields an update may carry. A full `Finding` from the list endpoint satisfies it,
+ * and so does the narrower payload the oracle publishes over SSE.
+ */
+export type FindingUpdate = Pick<
+	Finding,
+	| 'instance_id'
+	| 'target_id'
+	| 'target_name'
+	| 'package_name'
+	| 'package_version'
+	| 'ecosystem'
+	| 'advisory_id'
+	| 'is_active'
+> & {
+	severity?: string;
+	decree_score?: number;
+	epss_score?: number;
+	cvss_score?: number;
+	last_observed_at?: string;
+};
+
+/**
  * Apply a single finding update to the graph immutably.
  * Returns a new GraphModel with the change applied.
  */
 export function applyFindingUpdate(
 	graph: GraphModel,
-	finding: Finding,
+	finding: FindingUpdate,
 	targets: Target[],
 ): GraphModel {
 	const existingNode = graph.nodes.get(finding.instance_id);
@@ -24,18 +46,18 @@ export function applyFindingUpdate(
 			opacity = Math.max(0.3, Math.min(1.0, finding.epss_score));
 		}
 
-		const pulse = finding.last_observed_at
-			? now.getTime() - new Date(finding.last_observed_at).getTime() < 24 * 60 * 60 * 1000
-			: false;
+		// An update with no timestamp came from a scan that just ran, so it was observed now.
+		const lastObservedAt = finding.last_observed_at ?? now.toISOString();
+		const pulse = now.getTime() - new Date(lastObservedAt).getTime() < 24 * 60 * 60 * 1000;
 
 		const updatedNode = {
 			...existingNode,
 			severity,
 			decreeScore,
 			epssScore: finding.epss_score ?? 0,
-			cvssScore: finding.cvss_score ?? 0,
+			cvssScore: finding.cvss_score ?? existingNode.cvssScore,
 			isActive: true,
-			lastObservedAt: finding.last_observed_at ?? null,
+			lastObservedAt,
 			position: {
 				...existingNode.position,
 				y: decreeScore * 5, // Y_SCALE
@@ -102,7 +124,7 @@ export function applyFindingUpdate(
 /**
  * Reconstruct a findings list from the current graph plus a new finding.
  */
-function buildFindingsList(graph: GraphModel, newFinding: Finding): Finding[] {
+function buildFindingsList(graph: GraphModel, newFinding: FindingUpdate): Finding[] {
 	const findings: Finding[] = [];
 	for (const [, node] of graph.nodes) {
 		findings.push({
@@ -121,6 +143,9 @@ function buildFindingsList(graph: GraphModel, newFinding: Finding): Finding[] {
 			last_observed_at: node.lastObservedAt ?? undefined,
 		});
 	}
-	findings.push(newFinding);
+	findings.push({
+		...newFinding,
+		last_observed_at: newFinding.last_observed_at ?? new Date().toISOString(),
+	});
 	return findings;
 }
