@@ -1,4 +1,4 @@
-FROM golang:1.26.1-alpine AS builder
+FROM golang:1.26.8-alpine AS builder
 
 WORKDIR /app
 
@@ -8,7 +8,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o decree-oracle .
 
-FROM alpine:3.19
+FROM alpine:3.24
 
 WORKDIR /app
 COPY --from=builder /app/decree-oracle .
