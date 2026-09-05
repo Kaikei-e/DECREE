@@ -141,8 +141,13 @@ body {
 input[type="range"] {
 	-webkit-appearance: none;
 	appearance: none;
-	height: 4px;
+	/* The visible track stays 4px, but the pointer target has to be 24px (SC 2.5.8),
+	   so the box is padded and the background is clipped to the content box. */
+	height: 24px;
+	padding-block: 10px;
+	box-sizing: border-box;
 	background: var(--color-hud-surface);
+	background-clip: content-box;
 	border-radius: 999px;
 }
 

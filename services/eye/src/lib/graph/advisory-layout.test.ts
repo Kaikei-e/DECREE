@@ -140,4 +140,27 @@ describe('computeAdvisoryLayout', () => {
 		expect(node?.decreeScore).toBe(0);
 		expect(Number.isFinite(node?.position.y ?? Number.NaN)).toBe(true);
 	});
+
+	it('marks an approximated group so its target count does not read as authoritative', () => {
+		const model = computeAdvisoryLayout(
+			[group({ advisory_id: 'A', target_count: 4, target_names: ['a', 'b'] })],
+			new Set(['A']),
+		);
+		expect(model.nodes.get('A')?.targetName).toContain('~4');
+	});
+
+	it('shows the approximate count even when every target name fits in the sample', () => {
+		const model = computeAdvisoryLayout(
+			[group({ advisory_id: 'A', target_count: 2, target_names: ['a', 'b'] })],
+			new Set(['A']),
+		);
+		expect(model.nodes.get('A')?.targetName).toContain('~2');
+	});
+
+	it('leaves a group the server confirmed unmarked', () => {
+		const model = computeAdvisoryLayout([
+			group({ advisory_id: 'A', target_count: 4, target_names: ['a', 'b'] }),
+		]);
+		expect(model.nodes.get('A')?.targetName).not.toContain('~');
+	});
 });

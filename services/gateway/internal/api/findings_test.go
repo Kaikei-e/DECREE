@@ -229,7 +229,7 @@ func TestFindings_FiltersStillForwarded(t *testing.T) {
 	t.Parallel()
 	store := &mockStore{findings: []db.Finding{}}
 	doGet(t, store, "/api/projects/"+uuid.New().String()+
-		"/findings?severity=CRITICAL&ecosystem=npm&min_epss=0.5&active_only=true&limit=7&sort=epss&q=lodash")
+		"/findings?severity=CRITICAL&ecosystem=npm&min_epss=0.5&min_score=5&active_only=true&limit=7&sort=epss&q=lodash")
 
 	p := store.findingParams
 	if p.Severity == nil || *p.Severity != "critical" {
@@ -240,6 +240,9 @@ func TestFindings_FiltersStillForwarded(t *testing.T) {
 	}
 	if p.MinEPSS == nil || *p.MinEPSS != 0.5 {
 		t.Errorf("min_epss = %v", p.MinEPSS)
+	}
+	if p.MinScore == nil || *p.MinScore != 5 {
+		t.Errorf("min_score = %v", p.MinScore)
 	}
 	if !p.ActiveOnly || p.Limit != 7 || p.Sort != db.SortEPSS {
 		t.Errorf("active_only/limit/sort = %v/%d/%s", p.ActiveOnly, p.Limit, p.Sort)
@@ -326,5 +329,46 @@ func TestGetFacets(t *testing.T) {
 	w = doGet(t, &mockStore{}, "/api/projects/not-a-uuid/facets")
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("invalid uuid status = %d, want 400", w.Code)
+	}
+}
+
+// min_score is a risk floor on the DECREE Score, which ADR-0035 fixed to 0-10.
+func TestFindings_MinScoreParam(t *testing.T) {
+	t.Parallel()
+	pid := uuid.New().String()
+
+	for _, tc := range []struct {
+		param string
+		want  float32
+	}{{"5", 5}, {"6.5", 6.5}, {"0", 0}, {"10", 10}} {
+		store := &mockStore{findings: []db.Finding{}}
+		w := doGet(t, store, "/api/projects/"+pid+"/findings?min_score="+tc.param)
+		if w.Code != http.StatusOK {
+			t.Fatalf("min_score=%s status = %d, want 200; body = %s", tc.param, w.Code, w.Body.String())
+		}
+		if store.findingParams.MinScore == nil || *store.findingParams.MinScore != tc.want {
+			t.Errorf("min_score=%s forwarded as %v, want %v",
+				tc.param, store.findingParams.MinScore, tc.want)
+		}
+	}
+
+	// Unlike min_epss, an unusable value is rejected: a silently ignored risk
+	// floor shows the caller more findings than they asked to see.
+	for _, bad := range []string{"abc", "-1", "10.1", "11", "NaN", "Inf", ""} {
+		w := doGet(t, &mockStore{}, "/api/projects/"+pid+"/findings?min_score="+bad)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("min_score=%q status = %d, want 400", bad, w.Code)
+			continue
+		}
+		if code := errorCode(t, w); code != "invalid_min_score" {
+			t.Errorf("min_score=%q error code = %q, want invalid_min_score", bad, code)
+		}
+	}
+
+	// Absent means unfiltered, not zero.
+	store := &mockStore{findings: []db.Finding{}}
+	doGet(t, store, "/api/projects/"+pid+"/findings")
+	if store.findingParams.MinScore != nil {
+		t.Errorf("min_score defaulted to %v, want nil", store.findingParams.MinScore)
 	}
 }

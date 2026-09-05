@@ -48,6 +48,7 @@ type FindingFilters struct {
 	Severity   *string
 	Ecosystem  *string
 	MinEPSS    *float32
+	MinScore   *float32
 	Advisory   *string
 	Query      *string
 	ActiveOnly bool

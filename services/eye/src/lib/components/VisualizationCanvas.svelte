@@ -1,8 +1,8 @@
 <script lang="ts">
 import { untrack } from 'svelte';
 import type { GraphModel, GraphNode } from '$lib/graph/model';
-import { createRenderer, type RendererChoice } from '$lib/renderer/factory';
-import type { SceneRenderer } from '$lib/renderer/types';
+import { createRenderer } from '$lib/renderer/factory';
+import type { RendererChoice, RendererStatus, SceneRenderer } from '$lib/renderer/types';
 import CameraToolbar from './CameraToolbar.svelte';
 
 interface Props {
@@ -13,6 +13,8 @@ interface Props {
 	onNodeHover: (nodeId: string | null, position?: { x: number; y: number }) => void;
 	hasActiveFilters?: boolean;
 	onClearFilters?: () => void;
+	/** Fires on every mount with the renderer that is actually on screen, fallbacks included. */
+	onRendererReady?: (status: RendererStatus) => void;
 }
 
 const {
@@ -23,15 +25,18 @@ const {
 	onNodeHover,
 	hasActiveFilters = false,
 	onClearFilters,
+	onRendererReady,
 }: Props = $props();
 
 const describedById = $props.id();
 
 let containerEl: HTMLElement | undefined = $state();
 let renderer: SceneRenderer | null = $state(null);
+let mountedKind = $state<RendererChoice | null>(null);
 let cursorIndex = $state(-1);
 
-const is3D = $derived(rendererType === '3d');
+// Until something is mounted the request is the best guess; after that only the truth counts.
+const is3D = $derived((mountedKind ?? rendererType) === '3d');
 const sceneLabel = $derived(is3D ? '3D vulnerability scene' : '2D vulnerability graph');
 
 // Reading order for keyboard traversal mirrors the Priority Queue: worst first.
@@ -66,26 +71,35 @@ $effect(() => {
 
 	(async () => {
 		let r: SceneRenderer;
+		let status: RendererStatus;
 		try {
-			r = await createRenderer(type);
+			const created = await createRenderer(type);
 			if (cancelled || !containerEl) return;
-			r.mount(container);
+			created.renderer.mount(container);
+			r = created.renderer;
+			status = created.status;
 		} catch (err) {
+			const detail = err instanceof Error ? err.message : String(err);
 			console.warn('3D renderer failed, falling back to 2D:', err);
-			r = await createRenderer('2d');
+			const created = await createRenderer('2d');
 			if (cancelled || !containerEl) return;
-			r.mount(container);
+			created.renderer.mount(container);
+			r = created.renderer;
+			status = { kind: '2d', fallback: { reason: 'scene-init-failed', detail } };
 		}
 		r.onNodeClick(onNodeClick);
 		r.onNodeHover(onNodeHover);
 		r.setGraphModel(graphModel);
 		renderer = r;
+		mountedKind = status.kind;
+		onRendererReady?.(status);
 	})();
 
 	return () => {
 		cancelled = true;
 		renderer?.dispose();
 		renderer = null;
+		mountedKind = null;
 	};
 });
 

@@ -1,16 +1,17 @@
 <script lang="ts">
 import { TriangleAlert } from 'lucide-svelte';
 import type { VisualizationInsights } from '$lib/graph/insights';
+import type { RendererFallback } from '$lib/renderer/types';
 import type { ViewMode } from '$lib/state/query-params';
 
 interface Props {
 	summary: VisualizationInsights;
 	view: ViewMode;
-	/** The 3D scene asked for WebGL2 and did not get it, so the canvas is flat. */
-	fallbackRenderer: boolean;
+	/** Set when the 3D scene was asked for and something flat mounted instead. */
+	fallback: RendererFallback | null;
 }
 
-const { summary, view, fallbackRenderer }: Props = $props();
+const { summary, view, fallback }: Props = $props();
 
 const guideId = $props.id();
 
@@ -19,8 +20,13 @@ let showGuide = $state(false);
 const modeLabel = $derived.by(() => {
 	if (view === 'table') return 'Table mode';
 	if (view === '2d') return 'Risk plot mode';
-	return fallbackRenderer ? '2D fallback · WebGL2 unavailable' : '3D spatial mode';
+	if (!fallback) return '3D spatial mode';
+	return fallback.reason === 'webgl2-unavailable'
+		? '2D fallback · WebGL2 unavailable'
+		: '2D fallback · 3D scene failed to start';
 });
+
+const modeDetail = $derived(view === '3d' ? fallback?.detail : undefined);
 
 const guideButtonLabel = $derived(showGuide ? 'Hide scene guide' : 'Show scene guide');
 
@@ -54,7 +60,10 @@ const quickStats = $derived([
 	<div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
 		<div class="flex flex-wrap items-center gap-2">
 			<h2 class="hud-header">Scene At A Glance</h2>
-			<span class="rounded-full border border-hud-accent/30 bg-hud-accent/10 px-2 py-1 font-mono text-[11px] uppercase tracking-[0.14em] text-hud-accent">
+			<span
+				class="rounded-full border border-hud-accent/30 bg-hud-accent/10 px-2 py-1 font-mono text-[11px] uppercase tracking-[0.14em] text-hud-accent"
+				title={modeDetail}
+			>
 				{modeLabel}
 			</span>
 		</div>

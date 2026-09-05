@@ -55,3 +55,68 @@ describe('TimelineSlider', () => {
 		expect(slider.getAttribute('aria-valuetext')).toContain('Live');
 	});
 });
+
+describe('TimelineSlider layout', () => {
+	const replayAt = '2026-02-01T00:00:00.000Z';
+
+	beforeEach(() => timelineState.reset());
+	afterEach(() => {
+		cleanup();
+		timelineState.reset();
+	});
+
+	it('reflows onto a second line instead of overflowing the row', () => {
+		const { getByRole } = render(TimelineSlider, { props: { minDate, maxDate } });
+		expect(getByRole('group', { name: 'Timeline playback' }).className).toContain('flex-wrap');
+	});
+
+	it('keeps the transport buttons together on one line', () => {
+		const { getByRole } = render(TimelineSlider, { props: { minDate, maxDate } });
+		const back = getByRole('button', { name: 'Step backward' });
+		const forward = getByRole('button', { name: 'Step forward' });
+		const cluster = back.parentElement;
+
+		expect(forward.parentElement).toBe(cluster);
+		expect(cluster).not.toBe(getByRole('group', { name: 'Timeline playback' }));
+		expect(cluster?.className).toContain('shrink-0');
+	});
+
+	it('keeps the timestamp and the live toggle together as a pair', () => {
+		timelineState.startReplay(replayAt);
+		const { getByRole, getByText } = render(TimelineSlider, { props: { minDate, maxDate } });
+		const stamp = getByText(formatTimelineLabel(replayAt));
+
+		expect(stamp.parentElement).toBe(getByRole('button', { name: 'Live' }).parentElement);
+		expect(stamp.parentElement?.className).toContain('shrink-0');
+	});
+
+	it('holds the range input open when the row wraps', () => {
+		const { getByRole } = render(TimelineSlider, { props: { minDate, maxDate } });
+		const slider = getByRole('slider', { name: 'Timeline position' });
+
+		expect(slider.className).toContain('flex-1');
+		expect(slider.className).toMatch(/\bmin-w-\d/);
+	});
+
+	it('grows the timestamp box rather than wrapping or clipping the label', () => {
+		timelineState.startReplay(replayAt);
+		const { getByText } = render(TimelineSlider, { props: { minDate, maxDate } });
+		const stamp = getByText(formatTimelineLabel(replayAt));
+
+		expect(stamp.className).toContain('whitespace-nowrap');
+		expect(stamp.className).toMatch(/\bmin-w-\d/);
+		expect(stamp.className).not.toMatch(/(^|\s)w-\d/);
+	});
+
+	it('gives every control the 24px minimum touch target', () => {
+		const { getByRole } = render(TimelineSlider, { props: { minDate, maxDate } });
+		const iconOnly = ['Step backward', 'Replay from the start', 'Step forward'];
+
+		for (const name of [...iconOnly, 'Live']) {
+			expect(getByRole('button', { name }).className).toContain('min-h-6');
+		}
+		for (const name of iconOnly) {
+			expect(getByRole('button', { name }).className).toContain('min-w-6');
+		}
+	});
+});

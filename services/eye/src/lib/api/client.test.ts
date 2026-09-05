@@ -226,6 +226,22 @@ describe('api client functions', () => {
 		);
 	});
 
+	it('sends the score threshold to both listings under the same name', async () => {
+		fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [], has_more: false }));
+		await getFindings('p1', { min_score: 5 });
+		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/projects/p1/findings?min_score=5`);
+
+		fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [], has_more: false }));
+		await getAdvisories('p1', { min_score: 5 });
+		expect(fetchSpy).toHaveBeenLastCalledWith(`${BASE}/api/projects/p1/advisories?min_score=5`);
+	});
+
+	it('omits the score threshold entirely when it is not set', async () => {
+		fetchSpy.mockResolvedValueOnce(jsonResponse({ data: [], has_more: false }));
+		await getFindings('p1', { min_score: undefined, active_only: true });
+		expect(fetchSpy).toHaveBeenCalledWith(`${BASE}/api/projects/p1/findings?active_only=true`);
+	});
+
 	it('getAdvisories keeps the paged envelope intact', async () => {
 		fetchSpy.mockResolvedValueOnce(
 			jsonResponse({

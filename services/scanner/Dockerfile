@@ -27,8 +27,23 @@ FROM debian:bookworm-slim AS runtime
 # Install runtime dependencies: ca-certificates, wget (healthcheck), git, curl, syft
 RUN apt-get update && apt-get install -y ca-certificates wget git curl && rm -rf /var/lib/apt/lists/*
 
-# Install Syft
-RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+# Install Syft from a pinned release tarball verified against a hardcoded SHA-256.
+# SBOM output — and therefore scan results — is only reproducible if the syft version is fixed.
+ARG SYFT_VERSION=1.51.1
+ARG TARGETARCH
+RUN set -eux; \
+    case "${TARGETARCH}" in \
+      amd64) syft_sha256=8fcb33017a0dc1058298c923c436d19dfa68ae93968e0b423248542e3afb9fc3 ;; \
+      arm64) syft_sha256=a7fd2b784e6664acd44719270574f6cd8c6864fc2b1700bf9099bd1cccda7d7f ;; \
+      *) echo "unsupported TARGETARCH: '${TARGETARCH}' (BuildKit required)" >&2; exit 1 ;; \
+    esac; \
+    tarball="syft_${SYFT_VERSION}_linux_${TARGETARCH}.tar.gz"; \
+    curl -sSfL -o "/tmp/${tarball}" \
+      "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/${tarball}"; \
+    echo "${syft_sha256}  /tmp/${tarball}" | sha256sum -c -; \
+    tar -xzf "/tmp/${tarball}" -C /usr/local/bin syft; \
+    rm "/tmp/${tarball}"; \
+    syft --version
 
 COPY --from=builder /app/services/scanner/target/release/decree-scanner /usr/local/bin/decree-scanner
 EXPOSE 9000

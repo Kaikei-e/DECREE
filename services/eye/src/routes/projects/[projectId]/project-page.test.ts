@@ -20,6 +20,34 @@ vi.mock('$app/state', () => ({
 	},
 }));
 
+// The page must learn the renderer from the canvas, so the factory is the seam the test drives.
+const mounted = vi.hoisted(() => ({
+	status: { kind: '3d', fallback: null } as RendererStatus,
+}));
+
+vi.mock('$lib/renderer/factory', () => {
+	class StubRenderer {
+		mount() {}
+		dispose() {}
+		setGraphModel() {}
+		focusCluster() {}
+		focusNode() {}
+		resetView() {}
+		zoomIn() {}
+		zoomOut() {}
+		setViewPreset() {}
+		moveCamera() {}
+		setCameraVelocity() {}
+		onNodeClick() {}
+		onNodeHover() {}
+		setSelectedNode() {}
+		resize() {}
+	}
+	return {
+		createRenderer: async () => ({ renderer: new StubRenderer(), status: mounted.status }),
+	};
+});
+
 const getFindingDetail = vi.fn();
 const getFindings = vi.fn();
 
@@ -32,8 +60,10 @@ vi.mock('$lib/api/client', async (importOriginal) => {
 	};
 });
 
+import type { RendererStatus } from '$lib/renderer/types';
 import { appState } from '$lib/state/app.svelte';
 import { DEFAULT_FINDINGS_QUERY } from '$lib/state/query-params';
+import { liveAdvisories } from '$lib/state/sse-manager.svelte';
 import { timelineState } from '$lib/state/timeline.svelte';
 import type { AdvisoryGroup, Finding, FindingDetail } from '$lib/types/api';
 import ProjectPage from './+page.svelte';
@@ -95,7 +125,7 @@ function detail(instanceId: string, advisoryId: string): FindingDetail {
 	};
 }
 
-function data(overrides: Record<string, unknown> = {}) {
+function loaderData(overrides: Record<string, unknown> = {}) {
 	return {
 		projectId: 'proj-1',
 		project: { id: 'proj-1', name: 'helios-platform', created_at: '2026-01-01T00:00:00Z' },
@@ -113,6 +143,44 @@ function data(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+/**
+ * Build the loader payload and seed the live store from it, which is what the layout
+ * component does in the running app. The page reads the store, not the payload.
+ */
+function data(overrides: Record<string, unknown> = {}) {
+	const loaded = loaderData(overrides);
+	liveAdvisories.seed(loaded.advisories, loaded.findings, {
+		severity: loaded.query.severity,
+		ecosystem: loaded.query.ecosystem,
+		minEpss: loaded.query.minEpss,
+		minScore: loaded.query.minScore,
+		activeOnly: loaded.query.activeOnly,
+		q: loaded.query.q,
+	});
+	return loaded;
+}
+
+function changeEvent(overrides: Record<string, unknown> = {}) {
+	return {
+		type: 'finding.score_changed',
+		project_id: 'proj-1',
+		target_id: 't1',
+		target_name: 'alt',
+		scan_id: 'scan-1',
+		instance_id: '0001',
+		advisory_id: 'CVE-2026-0001',
+		package_name: 'pkg-0001',
+		package_version: '1.0.0',
+		ecosystem: 'npm',
+		severity: 'CRITICAL',
+		decree_score: 9.4,
+		epss_score: 0.9,
+		is_active: true,
+		has_exploit: false,
+		...overrides,
+	};
+}
+
 /** The URL of the last goto call, as search params. */
 function lastParams(): URLSearchParams {
 	const target = goto.mock.calls.at(-1)?.[0] as string;
@@ -123,6 +191,46 @@ function setSearch(search: string) {
 	pageState.url.search = search;
 }
 
+describe('project page live updates', () => {
+	beforeEach(() => {
+		appState.reset();
+		timelineState.reset();
+		setSearch('?view=table');
+	});
+
+	afterEach(() => {
+		cleanup();
+		setSearch('');
+	});
+
+	it('shows a streamed score without waiting for the loader to run again', async () => {
+		const { getByRole } = render(ProjectPage, { props: { data: data() } });
+
+		liveAdvisories.apply(changeEvent());
+		await tick();
+
+		expect(getByRole('gridcell', { name: /9\.4/ })).toBeTruthy();
+	});
+
+	it('marks a count the client could not recompute as approximate', async () => {
+		// A group whose instance set the loader never fully delivered cannot have its
+		// counts recomputed from one event, so it must not be shown as authoritative.
+		const loaded = loaderData({ findings: [] });
+		liveAdvisories.seed(loaded.advisories, [], {
+			activeOnly: DEFAULT_FINDINGS_QUERY.activeOnly,
+		});
+		const { getByText } = render(ProjectPage, { props: { data: loaded } });
+
+		liveAdvisories.apply(changeEvent());
+		await tick();
+
+		expect(liveAdvisories.estimated.has('CVE-2026-0001')).toBe(true);
+		// Both the table row and the priority queue must qualify the number.
+		expect(getByText('~2 inst')).toBeTruthy();
+		expect(getByText(/~2 instances across ~1 targets \(reconciling\)/)).toBeTruthy();
+	});
+});
+
 describe('project page', () => {
 	beforeEach(() => {
 		appState.reset();
@@ -132,6 +240,7 @@ describe('project page', () => {
 		getFindings.mockReset();
 		getFindings.mockResolvedValue({ data: [], has_more: false });
 		pageState.url = new SvelteURL('http://localhost:3400/projects/proj-1');
+		mounted.status = { kind: '3d', fallback: null };
 	});
 
 	afterEach(() => {
@@ -321,6 +430,21 @@ describe('project page', () => {
 			expect(getFindingDetail).not.toHaveBeenCalled();
 		});
 
+		it('lists the instances the advisory card counted, not a wider set', async () => {
+			getFindings.mockResolvedValue({ data: [], has_more: false });
+			setSearch('?advisory=CVE-2026-0001&score=5');
+
+			render(ProjectPage, {
+				props: { data: data({ query: { ...DEFAULT_FINDINGS_QUERY, minScore: 5 } }) },
+			});
+			await tick();
+
+			expect(getFindings).toHaveBeenCalledWith(
+				'proj-1',
+				expect.objectContaining({ advisory: 'CVE-2026-0001', min_score: 5 }),
+			);
+		});
+
 		it('opens an instance picked out of the advisory list', async () => {
 			getFindings.mockResolvedValue({ data: [finding('inst-x', 'npm')], has_more: false });
 			setSearch('?advisory=CVE-2026-0001');
@@ -372,6 +496,58 @@ describe('project page', () => {
 		});
 	});
 
+	describe('the scene describes the renderer that mounted', () => {
+		it('keeps the spatial wording while the 3D scene is really on screen', async () => {
+			const { findByText, getByText, queryByText } = render(ProjectPage, {
+				props: { data: data() },
+			});
+
+			await findByText('Threat Skyline');
+			await tick();
+			await tick();
+
+			expect(getByText('3D spatial mode')).toBeTruthy();
+			expect(getByText('High DECREE')).toBeTruthy();
+			expect(getByText('Height = DECREE score')).toBeTruthy();
+			expect(queryByText('Threat Map')).toBeNull();
+		});
+
+		it('drops the 3D wording when the canvas reports a flat renderer', async () => {
+			mounted.status = {
+				kind: '2d',
+				fallback: { reason: 'webgl2-unavailable', detail: 'Driver blocklisted WebGL2.' },
+			};
+
+			const { findByText, getByText, queryByText } = render(ProjectPage, {
+				props: { data: data() },
+			});
+
+			expect(await findByText('Threat Map')).toBeTruthy();
+			expect(getByText('2D fallback · WebGL2 unavailable')).toBeTruthy();
+			expect(getByText(/WebGL2 is unavailable/i)).toBeTruthy();
+			expect(getByText('Brightness = DECREE score')).toBeTruthy();
+			expect(queryByText('High DECREE')).toBeNull();
+			expect(queryByText('3D spatial mode')).toBeNull();
+		});
+
+		it('does not blame WebGL2 when the 3D scene failed for another reason', async () => {
+			mounted.status = {
+				kind: '2d',
+				fallback: { reason: 'scene-init-failed', detail: 'Error creating WebGL context.' },
+			};
+
+			const { findByText, getByText, queryByText } = render(ProjectPage, {
+				props: { data: data() },
+			});
+
+			expect(await findByText('Threat Map')).toBeTruthy();
+			expect(getByText('2D fallback · 3D scene failed to start')).toBeTruthy();
+			expect(queryByText(/WebGL2 is unavailable/i)).toBeNull();
+			expect(getByText(/could not start/i)).toBeTruthy();
+			expect(queryByText('High DECREE')).toBeNull();
+		});
+	});
+
 	describe('honest counts', () => {
 		it('counts advisories in the scene and instances in the risk plot', async () => {
 			const spatial = render(ProjectPage, { props: { data: data() } });
@@ -404,6 +580,19 @@ describe('project page', () => {
 				},
 			});
 			expect(filtered.getByText('No findings match the current filters.')).toBeTruthy();
+		});
+
+		it('offers a way out when a score threshold is what emptied the scene', () => {
+			const { getByRole } = render(ProjectPage, {
+				props: {
+					data: data({
+						advisories: [],
+						query: { ...DEFAULT_FINDINGS_QUERY, minScore: 5 },
+					}),
+				},
+			});
+
+			expect(getByRole('button', { name: 'Clear filters' })).toBeTruthy();
 		});
 
 		it('clears the filters from the empty scene', async () => {

@@ -245,3 +245,49 @@ func TestBuildFindingsQuery_AdvisoryFilterIsExact(t *testing.T) {
 		t.Error("advisory was not passed as a bound parameter")
 	}
 }
+
+// A NULL last_score cannot be asserted to clear a threshold, so the filter must
+// compare the column directly rather than COALESCE it to zero.
+func TestBuildFindingsQuery_MinScoreExcludesUnscoredFindings(t *testing.T) {
+	t.Parallel()
+	minScore := float32(5)
+	query, args := buildFindingsQuery(
+		FindingParams{
+			FindingFilters: FindingFilters{ProjectID: uuid.New(), MinScore: &minScore},
+			Sort:           SortPackage,
+			Limit:          10,
+		}, findingsFrom)
+
+	if !strings.Contains(query, "cfs.last_score >= $") {
+		t.Errorf("min_score filter is missing:\n%s", query)
+	}
+	if strings.Contains(query, "COALESCE(cfs.last_score, 0) >=") {
+		t.Errorf("min_score must not COALESCE NULL scores into the result:\n%s", query)
+	}
+	found := false
+	for _, a := range args {
+		if f, ok := a.(float32); ok && f == 5 {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("min_score was not passed as a bound parameter: %#v", args)
+	}
+}
+
+// Zero is the identity threshold; applying it would silently drop every
+// unscored finding at what the UI presents as the filter's off position.
+func TestBuildFindingsQuery_MinScoreZeroIsANoOp(t *testing.T) {
+	t.Parallel()
+	zero := float32(0)
+	query, _ := buildFindingsQuery(
+		FindingParams{
+			FindingFilters: FindingFilters{ProjectID: uuid.New(), MinScore: &zero},
+			Sort:           SortPackage,
+			Limit:          10,
+		}, findingsFrom)
+
+	if strings.Contains(query, "cfs.last_score >=") {
+		t.Errorf("min_score=0 must not add a condition:\n%s", query)
+	}
+}
