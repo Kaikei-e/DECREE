@@ -24,14 +24,14 @@ pub fn reachability_score(exposure_class: Option<&str>, is_direct: bool, dep_dep
 /// Compute the full DECREE Score.
 ///
 /// ```text
-/// DECREE Score = (CVSS_base × 0.4) + (EPSS × 100 × 0.35) + (Reachability × 0.25)
+/// DECREE Score = (CVSS_base × 0.4) + (EPSS × 10 × 0.35) + (Reachability × 0.25)
 /// ```
 ///
 /// Returns `None` if CVSS is not available (minimum required input).
 pub fn decree_score(cvss: Option<f32>, epss: Option<f32>, reachability: f32) -> Option<f32> {
     let cvss_val = cvss?;
     let cvss_component = cvss_val * 0.4;
-    let epss_component = epss.unwrap_or(0.0) * 100.0 * 0.35;
+    let epss_component = epss.unwrap_or(0.0) * 10.0 * 0.35;
     let reach_component = reachability * 0.25;
     Some(cvss_component + epss_component + reach_component)
 }
@@ -110,16 +110,16 @@ mod tests {
     #[test]
     fn full_score_all_inputs() {
         // CVSS=9.0, EPSS=0.5, Reachability=10.0
-        // = (9.0*0.4) + (0.5*100*0.35) + (10.0*0.25)
-        // = 3.6 + 17.5 + 2.5 = 23.6
+        // = (9.0*0.4) + (0.5*10*0.35) + (10.0*0.25)
+        // = 3.6 + 1.75 + 2.5 = 7.85
         let score = decree_score(Some(9.0), Some(0.5), 10.0).unwrap();
-        assert!((score - 23.6).abs() < 0.01);
+        assert!((score - 7.85).abs() < 0.01);
     }
 
     #[test]
     fn score_without_epss() {
         // CVSS=7.0, EPSS=None, Reachability=5.0
-        // = (7.0*0.4) + (0.0*100*0.35) + (5.0*0.25)
+        // = (7.0*0.4) + (0.0*10*0.35) + (5.0*0.25)
         // = 2.8 + 0.0 + 1.25 = 4.05
         let score = decree_score(Some(7.0), None, 5.0).unwrap();
         assert!((score - 4.05).abs() < 0.01);
@@ -139,19 +139,31 @@ mod tests {
     #[test]
     fn score_max_inputs() {
         // CVSS=10.0, EPSS=1.0, Reachability=10.0
-        // = (10.0*0.4) + (1.0*100*0.35) + (10.0*0.25)
-        // = 4.0 + 35.0 + 2.5 = 41.5
+        // = (10.0*0.4) + (1.0*10*0.35) + (10.0*0.25)
+        // = 4.0 + 3.5 + 2.5 = 10.0
         let score = decree_score(Some(10.0), Some(1.0), 10.0).unwrap();
-        assert!((score - 41.5).abs() < 0.01);
+        assert!((score - 10.0).abs() < 0.01);
     }
 
     #[test]
     fn score_low_epss() {
         // CVSS=5.0, EPSS=0.01, Reachability=3.0
-        // = (5.0*0.4) + (0.01*100*0.35) + (3.0*0.25)
-        // = 2.0 + 0.35 + 0.75 = 3.1
+        // = (5.0*0.4) + (0.01*10*0.35) + (3.0*0.25)
+        // = 2.0 + 0.035 + 0.75 = 2.785
         let score = decree_score(Some(5.0), Some(0.01), 3.0).unwrap();
-        assert!((score - 3.1).abs() < 0.01);
+        assert!((score - 2.785).abs() < 0.01);
+    }
+
+    #[test]
+    fn score_never_exceeds_ten() {
+        for cvss in [0.0, 3.3, 7.7, 10.0] {
+            for epss in [0.0, 0.4, 0.97, 1.0] {
+                for reach in [1.0, 5.0, 10.0] {
+                    let score = decree_score(Some(cvss), Some(epss), reach).unwrap();
+                    assert!((0.0..=10.0).contains(&score), "out of range: {score}");
+                }
+            }
+        }
     }
 
     // ── severity_label ──────────────────────────────────────────
