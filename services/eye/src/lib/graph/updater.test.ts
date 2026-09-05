@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Finding, Target } from '$lib/types/api';
 import { computeLayout } from './layout';
 import { createEmptyGraph } from './model';
-import { applyFindingUpdate } from './updater';
+import { applyFindingUpdate, type FindingUpdate } from './updater';
 
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
 	return {
@@ -141,5 +141,64 @@ describe('applyFindingUpdate', () => {
 		expect(initial.nodes.get('x')?.decreeScore).toBe(originalScore);
 		expect(updated.nodes.get('x')?.decreeScore).toBe(9.0);
 		expect(updated.nodes).not.toBe(initial.nodes);
+	});
+});
+
+describe('applyFindingUpdate with an SSE payload', () => {
+	// The oracle diff engine publishes neither cvss_score nor last_observed_at,
+	// so applying one must not blank the values the list endpoint already provided.
+	function makeSSEPayload(overrides: Partial<FindingUpdate> = {}): FindingUpdate {
+		return {
+			instance_id: 'x',
+			target_id: 'target-1',
+			target_name: 'my-app',
+			package_name: 'lodash',
+			package_version: '4.17.20',
+			ecosystem: 'npm',
+			advisory_id: 'GHSA-1234',
+			severity: 'HIGH',
+			decree_score: 9.1,
+			epss_score: 0.42,
+			is_active: true,
+			...overrides,
+		};
+	}
+
+	it('preserves the existing CVSS score when the payload omits it', () => {
+		const initial = computeLayout(
+			[makeFinding({ instance_id: 'x', decree_score: 3.0, cvss_score: 7.8 })],
+			[makeTarget()],
+		);
+
+		const updated = applyFindingUpdate(initial, makeSSEPayload(), [makeTarget()]);
+
+		expect(updated.nodes.get('x')?.cvssScore).toBe(7.8);
+		expect(updated.nodes.get('x')?.decreeScore).toBe(9.1);
+	});
+
+	it('treats a payload without last_observed_at as observed now', () => {
+		const initial = computeLayout(
+			[makeFinding({ instance_id: 'x', last_observed_at: '2020-01-01T00:00:00Z' })],
+			[makeTarget()],
+		);
+
+		const updated = applyFindingUpdate(initial, makeSSEPayload(), [makeTarget()]);
+
+		const node = updated.nodes.get('x');
+		expect(node?.visual.pulse).toBe(true);
+		expect(node?.lastObservedAt).not.toBe('2020-01-01T00:00:00Z');
+	});
+
+	it('still honours an explicit last_observed_at when one is present', () => {
+		const initial = computeLayout([makeFinding({ instance_id: 'x' })], [makeTarget()]);
+
+		const updated = applyFindingUpdate(
+			initial,
+			makeSSEPayload({ last_observed_at: '2020-01-01T00:00:00Z' }),
+			[makeTarget()],
+		);
+
+		expect(updated.nodes.get('x')?.lastObservedAt).toBe('2020-01-01T00:00:00Z');
+		expect(updated.nodes.get('x')?.visual.pulse).toBe(false);
 	});
 });

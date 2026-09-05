@@ -1,6 +1,11 @@
+/** Event names the gateway writes into the `event:` field (see internal/sse/consumer.go). */
+export const SSE_EVENT_TYPES = ['finding_changed', 'notification_sent'] as const;
+
+export type SSEEventType = (typeof SSE_EVENT_TYPES)[number];
+
 export interface SSEEvent {
 	id: string;
-	type: string;
+	type: SSEEventType;
 	data: string;
 }
 
@@ -8,6 +13,7 @@ export interface SSEOptions {
 	url: string;
 	lastEventId?: string;
 	onEvent: (event: SSEEvent) => void;
+	onOpen?: () => void;
 	onError?: (error: Event) => void;
 }
 
@@ -26,15 +32,19 @@ export function createSSEConnection(options: SSEOptions): SSEConnection {
 
 	const source = new EventSource(url);
 
-	source.onmessage = (e: MessageEvent) => {
-		if (e.lastEventId) {
-			lastEventId = e.lastEventId;
-		}
-		options.onEvent({
-			id: e.lastEventId ?? '',
-			type: e.type,
-			data: e.data,
+	// The gateway always names its events, and EventSource.onmessage only fires for
+	// unnamed ones — so every event has to be subscribed to explicitly.
+	for (const type of SSE_EVENT_TYPES) {
+		source.addEventListener(type, (e: MessageEvent) => {
+			if (e.lastEventId) {
+				lastEventId = e.lastEventId;
+			}
+			options.onEvent({ id: e.lastEventId ?? '', type, data: e.data });
 		});
+	}
+
+	source.onopen = () => {
+		options.onOpen?.();
 	};
 
 	source.onerror = (e: Event) => {

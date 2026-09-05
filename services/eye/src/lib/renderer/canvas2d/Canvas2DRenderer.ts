@@ -1,10 +1,122 @@
-import type { GraphModel } from '$lib/graph/model';
-import type { SceneRenderer } from '../types';
+import type { GraphModel, GraphNode, Severity } from '$lib/graph/model';
+import { SEVERITY_NOTCHES } from '$lib/graph/model';
+import type { CameraMove, SceneRenderer } from '../types';
 
 const PADDING = 40;
-const NODE_MIN_RADIUS = 4;
-const NODE_MAX_RADIUS = 16;
+export const NODE_MIN_RADIUS = 4;
+export const NODE_MAX_RADIUS = 16;
+const NODE_SIZE_RANGE = 3;
 const LABEL_FONT = '11px monospace';
+const LABEL_COUNT = 15;
+
+/** Mirrors the 3D controls' minDistance/maxDistance so 2D zoom cannot run away either. */
+export const MIN_ZOOM_FACTOR = 0.25;
+export const MAX_ZOOM_FACTOR = 12;
+
+/** --color-hud-void, the same ink the 3D bands and the DOM badge use. */
+export const NOTCH_TICK_COLOR = '#050a0e';
+export const SELECTION_COLOR = '#00e5ff';
+const HOVER_COLOR = '#00e5ff';
+
+/** A press and release this close together is a click; anything further is a pan. */
+const CLICK_DRAG_THRESHOLD_PX = 5;
+/** One keyboard step is a fraction of the shorter canvas edge, so it reads the same at any zoom. */
+const PAN_STEP_RATIO = 0.15;
+const KEY_MOVE_STEPS_PER_SECOND = 2;
+const WHEEL_ZOOM_FACTOR = 1.12;
+
+const NOTCH_TICK_PITCH = Math.PI / 5.6;
+const NOTCH_TICK_INNER = 0.42;
+const NOTCH_TICK_OUTER = 0.96;
+
+export interface ViewTransform {
+	scale: number;
+	offsetX: number;
+	offsetY: number;
+}
+
+export interface RadialTick {
+	x1: number;
+	y1: number;
+	x2: number;
+	y2: number;
+}
+
+export function nodeRadius(visualSize: number): number {
+	const t = Math.max(0, Math.min(1, visualSize / NODE_SIZE_RANGE));
+	return NODE_MIN_RADIUS + (NODE_MAX_RADIUS - NODE_MIN_RADIUS) * t;
+}
+
+export function clampZoomScale(scale: number, fitScale: number): number {
+	if (!(fitScale > 0)) return scale;
+	return Math.min(Math.max(scale, fitScale * MIN_ZOOM_FACTOR), fitScale * MAX_ZOOM_FACTOR);
+}
+
+export function computeFitView(
+	nodes: GraphNode[],
+	canvasW: number,
+	canvasH: number,
+): ViewTransform | null {
+	if (nodes.length === 0) return null;
+
+	let minX = Number.POSITIVE_INFINITY;
+	let maxX = Number.NEGATIVE_INFINITY;
+	let minY = Number.POSITIVE_INFINITY;
+	let maxY = Number.NEGATIVE_INFINITY;
+	for (const n of nodes) {
+		if (n.position.x < minX) minX = n.position.x;
+		if (n.position.x > maxX) maxX = n.position.x;
+		if (n.position.y < minY) minY = n.position.y;
+		if (n.position.y > maxY) maxY = n.position.y;
+	}
+
+	const spanX = maxX - minX || 1;
+	const spanY = maxY - minY || 1;
+	const scale = Math.min((canvasW - PADDING * 2) / spanX, (canvasH - PADDING * 2) / spanY);
+
+	return {
+		scale,
+		offsetX: canvasW / 2 - ((minX + maxX) / 2) * scale,
+		offsetY: canvasH / 2 - ((minY + maxY) / 2) * scale,
+	};
+}
+
+/** Severity rank as ticks counted clockwise from noon, matching the 3D bands and the DOM badge. */
+export function computeNotchTicks(severity: Severity, radius: number): RadialTick[] {
+	const ticks: RadialTick[] = [];
+	for (let i = 0; i < SEVERITY_NOTCHES[severity]; i++) {
+		const angle = -Math.PI / 2 + i * NOTCH_TICK_PITCH;
+		const cos = Math.cos(angle);
+		const sin = Math.sin(angle);
+		ticks.push({
+			x1: cos * radius * NOTCH_TICK_INNER,
+			y1: sin * radius * NOTCH_TICK_INNER,
+			x2: cos * radius * NOTCH_TICK_OUTER,
+			y2: sin * radius * NOTCH_TICK_OUTER,
+		});
+	}
+	return ticks;
+}
+
+export function pickNodeAt(
+	nodes: GraphNode[],
+	sx: number,
+	sy: number,
+	view: ViewTransform,
+): string | null {
+	// Reverse order so top-drawn nodes are tested first
+	for (let i = nodes.length - 1; i >= 0; i--) {
+		const node = nodes[i];
+		if (!node) continue;
+		const radius = nodeRadius(node.visual.size);
+		const dx = sx - (node.position.x * view.scale + view.offsetX);
+		const dy = sy - (node.position.y * view.scale + view.offsetY);
+		if (dx * dx + dy * dy <= radius * radius) {
+			return node.id;
+		}
+	}
+	return null;
+}
 
 export class Canvas2DRenderer implements SceneRenderer {
 	private canvas: HTMLCanvasElement | null = null;
@@ -18,11 +130,21 @@ export class Canvas2DRenderer implements SceneRenderer {
 		| ((nodeId: string | null, position?: { x: number; y: number }) => void)
 		| null = null;
 	private hoveredNodeId: string | null = null;
+	private selectedNodeId: string | null = null;
+
+	private nodeList: GraphNode[] = [];
+	private labelNodes: GraphNode[] = [];
 
 	// View transform
 	private offsetX = 0;
 	private offsetY = 0;
 	private scale = 1;
+	private fitScale = 0;
+	private viewFitted = false;
+
+	private pointerDownAt: { x: number; y: number } | null = null;
+	private dragFrom: { x: number; y: number } | null = null;
+	private velocity: CameraMove = {};
 
 	mount(container: HTMLElement) {
 		this.container = container;
@@ -38,28 +160,39 @@ export class Canvas2DRenderer implements SceneRenderer {
 	}
 
 	dispose() {
-		cancelAnimationFrame(this.animationId);
+		this.velocity = {};
+		this.stopMoveLoop();
 		// Remove event listeners
 		this.canvas?.removeEventListener('pointermove', this.handlePointerMove);
-		this.canvas?.removeEventListener('click', this.handleClick);
+		this.canvas?.removeEventListener('pointerdown', this.handlePointerDown);
+		this.canvas?.removeEventListener('pointerup', this.handlePointerUp);
+		this.canvas?.removeEventListener('pointercancel', this.handlePointerUp);
+		this.canvas?.removeEventListener('wheel', this.handleWheel);
 		// DOM cleanup
-		if (this.canvas && this.container) {
-			this.container.removeChild(this.canvas);
+		if (this.canvas && this.canvas.parentNode === this.container) {
+			this.container?.removeChild(this.canvas);
 		}
 		this.canvas = null;
 		this.ctx = null;
 	}
 
 	setGraphModel(model: GraphModel) {
+		const cameFromEmpty = this.nodeList.length === 0;
 		this.graph = model;
-		this.fitView();
+		this.nodeList = Array.from(model.nodes.values());
+		// Sorting the label set here keeps it off the per-frame path
+		this.labelNodes = [...this.nodeList]
+			.sort((a, b) => b.decreeScore - a.decreeScore)
+			.slice(0, LABEL_COUNT);
+		// Findings reload on every filter change and SSE event; refitting then would undo the user's pan.
+		if (!this.viewFitted || cameFromEmpty) this.fitView();
 		this.draw();
 	}
 
 	focusCluster(clusterId: string) {
 		const cluster = this.graph?.clusters.find((c) => c.id === clusterId);
 		if (cluster && this.canvas) {
-			this.offsetX = this.canvas.width / 2 - cluster.centerX * this.scale;
+			this.offsetX = this.canvasWidth() / 2 - cluster.centerX * this.scale;
 			this.draw();
 		}
 	}
@@ -67,8 +200,8 @@ export class Canvas2DRenderer implements SceneRenderer {
 	focusNode(nodeId: string) {
 		const node = this.graph?.nodes.get(nodeId);
 		if (node && this.canvas) {
-			this.offsetX = this.canvas.width / 2 - node.position.x * this.scale;
-			this.offsetY = this.canvas.height / 2 - node.position.y * this.scale;
+			this.offsetX = this.canvasWidth() / 2 - node.position.x * this.scale;
+			this.offsetY = this.canvasHeight() / 2 - node.position.y * this.scale;
 			this.draw();
 		}
 	}
@@ -79,27 +212,11 @@ export class Canvas2DRenderer implements SceneRenderer {
 	}
 
 	zoomIn(): void {
-		if (!this.canvas) return;
-		const dpr = window.devicePixelRatio || 1;
-		const cx = this.canvas.width / dpr / 2;
-		const cy = this.canvas.height / dpr / 2;
-		const factor = 1.25;
-		this.offsetX = cx - (cx - this.offsetX) * factor;
-		this.offsetY = cy - (cy - this.offsetY) * factor;
-		this.scale *= factor;
-		this.draw();
+		this.applyZoom(1.25);
 	}
 
 	zoomOut(): void {
-		if (!this.canvas) return;
-		const dpr = window.devicePixelRatio || 1;
-		const cx = this.canvas.width / dpr / 2;
-		const cy = this.canvas.height / dpr / 2;
-		const factor = 0.8;
-		this.offsetX = cx - (cx - this.offsetX) * factor;
-		this.offsetY = cy - (cy - this.offsetY) * factor;
-		this.scale *= factor;
-		this.draw();
+		this.applyZoom(0.8);
 	}
 
 	setViewPreset(_preset: 'top' | 'front'): void {
@@ -107,7 +224,60 @@ export class Canvas2DRenderer implements SceneRenderer {
 		this.draw();
 	}
 
-	setSelectedNode(_nodeId: string | null): void {}
+	moveCamera(move: CameraMove): void {
+		if (!this.canvas) return;
+		const step = Math.min(this.canvasWidth(), this.canvasHeight()) * PAN_STEP_RATIO;
+		const dx = -(move.right ?? 0) * step;
+		const dy = (move.forward ?? 0) * step;
+		if (dx === 0 && dy === 0) return;
+		this.panBy(dx, dy);
+	}
+
+	setCameraVelocity(move: CameraMove): void {
+		this.velocity = move;
+		if ((move.right ?? 0) !== 0 || (move.forward ?? 0) !== 0) {
+			this.startMoveLoop();
+		} else {
+			this.stopMoveLoop();
+		}
+	}
+
+	/** 2D draws on demand, so held keys need a loop of their own rather than a permanent one. */
+	private startMoveLoop() {
+		if (this.animationId) return;
+		let last = performance.now();
+		const tick = (now: number) => {
+			this.stepCamera((now - last) / 1000);
+			last = now;
+			this.animationId = requestAnimationFrame(tick);
+		};
+		this.animationId = requestAnimationFrame(tick);
+	}
+
+	private stopMoveLoop() {
+		cancelAnimationFrame(this.animationId);
+		this.animationId = 0;
+	}
+
+	private stepCamera(delta: number) {
+		if (delta <= 0) return;
+		const { right = 0, forward = 0 } = this.velocity;
+		if (right === 0 && forward === 0) return;
+		const factor = KEY_MOVE_STEPS_PER_SECOND * delta;
+		this.moveCamera({ right: right * factor, forward: forward * factor });
+	}
+
+	private panBy(dx: number, dy: number) {
+		this.offsetX += dx;
+		this.offsetY += dy;
+		this.draw();
+	}
+
+	setSelectedNode(nodeId: string | null): void {
+		if (nodeId === this.selectedNodeId) return;
+		this.selectedNodeId = nodeId;
+		this.draw();
+	}
 
 	onNodeClick(callback: (nodeId: string) => void) {
 		this.clickCallback = callback;
@@ -124,34 +294,40 @@ export class Canvas2DRenderer implements SceneRenderer {
 		const h = this.container.clientHeight;
 		this.canvas.width = w * dpr;
 		this.canvas.height = h * dpr;
-		this.ctx?.scale(dpr, dpr);
+		this.draw();
+	}
+
+	private canvasWidth(): number {
+		return (this.canvas?.width ?? 0) / (window.devicePixelRatio || 1);
+	}
+
+	private canvasHeight(): number {
+		return (this.canvas?.height ?? 0) / (window.devicePixelRatio || 1);
+	}
+
+	private applyZoom(factor: number) {
+		this.applyZoomAt(factor, this.canvasWidth() / 2, this.canvasHeight() / 2);
+	}
+
+	private applyZoomAt(factor: number, cx: number, cy: number) {
+		if (!this.canvas) return;
+		const next = clampZoomScale(this.scale * factor, this.fitScale);
+		const applied = next / this.scale;
+		this.offsetX = cx - (cx - this.offsetX) * applied;
+		this.offsetY = cy - (cy - this.offsetY) * applied;
+		this.scale = next;
 		this.draw();
 	}
 
 	private fitView() {
-		if (!this.graph || !this.canvas) return;
-		const nodes = Array.from(this.graph.nodes.values());
-		if (nodes.length === 0) return;
-
-		let minX = Number.POSITIVE_INFINITY;
-		let maxX = Number.NEGATIVE_INFINITY;
-		let minY = Number.POSITIVE_INFINITY;
-		let maxY = Number.NEGATIVE_INFINITY;
-		for (const n of nodes) {
-			if (n.position.x < minX) minX = n.position.x;
-			if (n.position.x > maxX) maxX = n.position.x;
-			if (n.position.y < minY) minY = n.position.y;
-			if (n.position.y > maxY) maxY = n.position.y;
-		}
-
-		const dpr = window.devicePixelRatio || 1;
-		const canvasW = this.canvas.width / dpr;
-		const canvasH = this.canvas.height / dpr;
-		const spanX = maxX - minX || 1;
-		const spanY = maxY - minY || 1;
-		this.scale = Math.min((canvasW - PADDING * 2) / spanX, (canvasH - PADDING * 2) / spanY);
-		this.offsetX = PADDING - minX * this.scale;
-		this.offsetY = PADDING - minY * this.scale;
+		if (!this.canvas) return;
+		const view = computeFitView(this.nodeList, this.canvasWidth(), this.canvasHeight());
+		if (!view) return;
+		this.viewFitted = true;
+		this.scale = view.scale;
+		this.fitScale = view.scale;
+		this.offsetX = view.offsetX;
+		this.offsetY = view.offsetY;
 	}
 
 	private worldToScreen(x: number, y: number): { sx: number; sy: number } {
@@ -181,7 +357,7 @@ export class Canvas2DRenderer implements SceneRenderer {
 		}
 
 		// Draw edges
-		ctx.strokeStyle = 'rgba(0, 229, 255, 0.08)';
+		ctx.strokeStyle = 'rgba(0, 229, 255, 0.12)';
 		ctx.lineWidth = 1;
 		for (const edge of this.graph.edges) {
 			const src = this.graph.nodes.get(edge.source);
@@ -196,11 +372,12 @@ export class Canvas2DRenderer implements SceneRenderer {
 			}
 		}
 
-		// Draw nodes
-		const nodes = Array.from(this.graph.nodes.values());
-		for (const node of nodes) {
+		// Draw nodes, each carrying its severity rank as dark radial ticks
+		ctx.lineCap = 'round';
+		let selected: { sx: number; sy: number; radius: number } | null = null;
+		for (const node of this.nodeList) {
 			const { sx, sy } = this.worldToScreen(node.position.x, node.position.y);
-			const radius = NODE_MIN_RADIUS + (NODE_MAX_RADIUS - NODE_MIN_RADIUS) * (node.visual.size / 3);
+			const radius = nodeRadius(node.visual.size);
 
 			ctx.globalAlpha = node.visual.opacity;
 			ctx.fillStyle = node.visual.color;
@@ -208,13 +385,40 @@ export class Canvas2DRenderer implements SceneRenderer {
 			ctx.arc(sx, sy, radius, 0, Math.PI * 2);
 			ctx.fill();
 
-			// Hover highlight
 			if (node.id === this.hoveredNodeId) {
-				ctx.strokeStyle = '#00e5ff';
+				ctx.strokeStyle = HOVER_COLOR;
 				ctx.lineWidth = 2;
 				ctx.stroke();
 			}
 
+			ctx.globalAlpha = 1;
+			ctx.strokeStyle = NOTCH_TICK_COLOR;
+			ctx.lineWidth = Math.max(1.4, radius * 0.2);
+			for (const tick of computeNotchTicks(node.severity, radius)) {
+				ctx.beginPath();
+				ctx.moveTo(sx + tick.x1, sy + tick.y1);
+				ctx.lineTo(sx + tick.x2, sy + tick.y2);
+				ctx.stroke();
+			}
+
+			if (node.id === this.selectedNodeId) {
+				selected = { sx, sy, radius };
+			}
+		}
+		ctx.lineCap = 'butt';
+
+		if (selected) {
+			ctx.strokeStyle = SELECTION_COLOR;
+			ctx.lineWidth = 2;
+			ctx.beginPath();
+			ctx.arc(selected.sx, selected.sy, selected.radius + 4, 0, Math.PI * 2);
+			ctx.stroke();
+
+			ctx.globalAlpha = 0.45;
+			ctx.lineWidth = 1;
+			ctx.beginPath();
+			ctx.arc(selected.sx, selected.sy, selected.radius + 9, 0, Math.PI * 2);
+			ctx.stroke();
 			ctx.globalAlpha = 1;
 		}
 
@@ -222,11 +426,7 @@ export class Canvas2DRenderer implements SceneRenderer {
 		ctx.font = LABEL_FONT;
 		ctx.fillStyle = '#7a9ab5';
 		ctx.textAlign = 'center';
-		const sortedByScore = [...nodes].sort((a, b) => b.decreeScore - a.decreeScore);
-		const labelCount = Math.min(sortedByScore.length, 15);
-		for (let i = 0; i < labelCount; i++) {
-			const node = sortedByScore[i];
-			if (!node) continue;
+		for (const node of this.labelNodes) {
 			const { sx, sy } = this.worldToScreen(node.position.x, node.position.y);
 			ctx.fillText(node.advisoryId, sx, sy - 12);
 		}
@@ -234,31 +434,22 @@ export class Canvas2DRenderer implements SceneRenderer {
 		ctx.restore();
 	}
 
-	private hitTest(sx: number, sy: number): string | null {
-		if (!this.graph) return null;
-		const nodes = Array.from(this.graph.nodes.values());
-		// Reverse order so top-drawn nodes are tested first
-		for (let i = nodes.length - 1; i >= 0; i--) {
-			const node = nodes[i];
-			if (!node) continue;
-			const pos = this.worldToScreen(node.position.x, node.position.y);
-			const radius = NODE_MIN_RADIUS + (NODE_MAX_RADIUS - NODE_MIN_RADIUS) * (node.visual.size / 3);
-			const dx = sx - pos.sx;
-			const dy = sy - pos.sy;
-			if (dx * dx + dy * dy <= radius * radius) {
-				return node.id;
-			}
-		}
-		return null;
-	}
-
 	private handlePointerMove = (e: PointerEvent) => {
 		const canvas = this.canvas;
 		if (!canvas) return;
+
+		if (this.dragFrom) {
+			this.panBy(e.clientX - this.dragFrom.x, e.clientY - this.dragFrom.y);
+			this.dragFrom = { x: e.clientX, y: e.clientY };
+			return;
+		}
+
 		const rect = canvas.getBoundingClientRect();
-		const sx = e.clientX - rect.left;
-		const sy = e.clientY - rect.top;
-		const nodeId = this.hitTest(sx, sy);
+		const nodeId = pickNodeAt(this.nodeList, e.clientX - rect.left, e.clientY - rect.top, {
+			scale: this.scale,
+			offsetX: this.offsetX,
+			offsetY: this.offsetY,
+		});
 		if (nodeId !== this.hoveredNodeId) {
 			this.hoveredNodeId = nodeId;
 			this.hoverCallback?.(nodeId, nodeId ? { x: e.clientX, y: e.clientY } : undefined);
@@ -266,21 +457,48 @@ export class Canvas2DRenderer implements SceneRenderer {
 		}
 	};
 
-	private handleClick = (e: MouseEvent) => {
+	private handlePointerDown = (e: PointerEvent) => {
+		this.pointerDownAt = { x: e.clientX, y: e.clientY };
+		this.dragFrom = { x: e.clientX, y: e.clientY };
+		this.canvas?.setPointerCapture?.(e.pointerId);
+	};
+
+	private handlePointerUp = (e: PointerEvent) => {
+		const start = this.pointerDownAt;
+		this.pointerDownAt = null;
+		this.dragFrom = null;
+		this.canvas?.releasePointerCapture?.(e.pointerId);
+
 		const canvas = this.canvas;
-		if (!canvas) return;
+		if (!start || !canvas) return;
+		if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > CLICK_DRAG_THRESHOLD_PX) return;
+
 		const rect = canvas.getBoundingClientRect();
-		const sx = e.clientX - rect.left;
-		const sy = e.clientY - rect.top;
-		const nodeId = this.hitTest(sx, sy);
+		const nodeId = pickNodeAt(this.nodeList, e.clientX - rect.left, e.clientY - rect.top, {
+			scale: this.scale,
+			offsetX: this.offsetX,
+			offsetY: this.offsetY,
+		});
 		if (nodeId) {
 			this.clickCallback?.(nodeId);
 		}
 	};
 
+	private handleWheel = (e: WheelEvent) => {
+		const canvas = this.canvas;
+		if (!canvas) return;
+		e.preventDefault();
+		const rect = canvas.getBoundingClientRect();
+		const factor = e.deltaY < 0 ? WHEEL_ZOOM_FACTOR : 1 / WHEEL_ZOOM_FACTOR;
+		this.applyZoomAt(factor, e.clientX - rect.left, e.clientY - rect.top);
+	};
+
 	private setupEvents() {
 		if (!this.canvas) return;
 		this.canvas.addEventListener('pointermove', this.handlePointerMove);
-		this.canvas.addEventListener('click', this.handleClick);
+		this.canvas.addEventListener('pointerdown', this.handlePointerDown);
+		this.canvas.addEventListener('pointerup', this.handlePointerUp);
+		this.canvas.addEventListener('pointercancel', this.handlePointerUp);
+		this.canvas.addEventListener('wheel', this.handleWheel, { passive: false });
 	}
 }

@@ -1,25 +1,16 @@
 import type { GraphModel } from '$lib/graph/model';
 import { createEmptyGraph } from '$lib/graph/model';
-import type { Finding, FindingDetail, Target } from '$lib/types/api';
+import type { Finding, Target } from '$lib/types/api';
 
-export type RendererType = '3d' | '2d';
-
-export interface FindingFilters {
-	severity?: string;
-	ecosystem?: string;
-	minEpss?: number;
-	activeOnly: boolean;
-}
-
+/**
+ * Loaded data plus the live-stream graph. Filters, view mode and selection are not here:
+ * the URL is their single source of truth, so the layout loader can key off them.
+ */
 function createAppState() {
 	let selectedProjectId = $state<string | null>(null);
 	let targets = $state<Target[]>([]);
 	let findings = $state<Finding[]>([]);
 	let graphModel = $state<GraphModel>(createEmptyGraph());
-	let selectedNodeId = $state<string | null>(null);
-	let selectedFindingDetail = $state<FindingDetail | null>(null);
-	let filters = $state<FindingFilters>({ activeOnly: true });
-	let rendererType = $state<RendererType>('3d');
 	let error = $state<string | null>(null);
 
 	return {
@@ -51,34 +42,6 @@ function createAppState() {
 			graphModel = v;
 		},
 
-		get selectedNodeId() {
-			return selectedNodeId;
-		},
-		set selectedNodeId(v: string | null) {
-			selectedNodeId = v;
-		},
-
-		get selectedFindingDetail() {
-			return selectedFindingDetail;
-		},
-		set selectedFindingDetail(v: FindingDetail | null) {
-			selectedFindingDetail = v;
-		},
-
-		get filters() {
-			return filters;
-		},
-		set filters(v: FindingFilters) {
-			filters = v;
-		},
-
-		get rendererType() {
-			return rendererType;
-		},
-		set rendererType(v: RendererType) {
-			rendererType = v;
-		},
-
 		get error() {
 			return error;
 		},
@@ -91,10 +54,6 @@ function createAppState() {
 			targets = [];
 			findings = [];
 			graphModel = createEmptyGraph();
-			selectedNodeId = null;
-			selectedFindingDetail = null;
-			filters = { activeOnly: true };
-			rendererType = '3d';
 			error = null;
 		},
 	};

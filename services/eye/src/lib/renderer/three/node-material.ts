@@ -33,8 +33,19 @@ export function createGlowMaterial(): THREE.MeshStandardMaterial {
 
 export function createEdgeMaterial(): THREE.LineBasicMaterial {
 	return new THREE.LineBasicMaterial({
-		color: 0x0a3050,
+		color: 0x1a5d8f,
 		transparent: true,
-		opacity: 0.15,
+		opacity: 0.32,
+	});
+}
+
+/** --color-hud-void: 5.17:1 or better against every severity colour. */
+export const NOTCH_COLOR = 0x050a0e;
+
+export function createNotchMaterial(): THREE.MeshStandardMaterial {
+	return new THREE.MeshStandardMaterial({
+		color: new THREE.Color(NOTCH_COLOR),
+		roughness: 0.95,
+		metalness: 0,
 	});
 }

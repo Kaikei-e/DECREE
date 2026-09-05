@@ -1,33 +1,122 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import type { GraphModel, GraphNode } from '$lib/graph/model';
-import type { SceneRenderer } from '../types';
+import type { GraphModel, GraphNode, Severity } from '$lib/graph/model';
+import { SEVERITY_NOTCHES } from '$lib/graph/model';
+import type { CameraMove, SceneRenderer } from '../types';
 import {
 	animateCamera,
 	clusterPreset,
-	frontPreset,
+	FRONT_DIRECTION,
+	fitPreset,
 	nodePreset,
 	overviewPreset,
-	topDownPreset,
+	TOP_DIRECTION,
 } from './camera-presets';
 import {
 	createEdgeMaterial,
 	createGlowMaterial,
 	createNodeMaterial,
+	createNotchMaterial,
 	GLOW_MAX_INTENSITY,
 	GLOW_MIN_INTENSITY,
 	GLOW_PERIOD,
 } from './node-material';
 import { NodeRaycaster } from './raycaster';
 
-const NODE_GEOMETRY = new THREE.CylinderGeometry(0.16, 0.26, 1, 6, 1, false);
+const COLUMN_RADIUS_TOP = 0.16;
+const COLUMN_RADIUS_BOTTOM = 0.26;
 const MIN_COLUMN_HEIGHT = 0.6;
 const MAX_COLUMN_WIDTH = 0.5;
 const DISTRICT_PADDING_X = 1.8;
 const DISTRICT_PADDING_Z = 1.6;
 const DISTRICT_FLOOR_Y = -0.04;
 const DISTRICT_PLATE_HEIGHT = 0.05;
-const CAMERA_VERTICAL_PADDING = 9;
+const EDGE_ATTACH_RATIO = 0.92;
+const DEFAULT_MAX_DISTANCE = 200;
+
+/** A press and release this close together is a click; anything further is a camera drag. */
+const CLICK_DRAG_THRESHOLD_PX = 5;
+
+/** The camera may not sink into the ground plane, whatever the keys ask for. */
+export const MIN_CAMERA_HEIGHT = 0.5;
+
+const MIN_SCENE_SCALE = 20;
+const MOVE_STEP_RATIO = 0.15;
+const KEY_MOVE_STEPS_PER_SECOND = 2;
+const ROAM_RADIUS_RATIO = 1.5;
+const ROAM_HEIGHT_RATIO = 1.2;
+/** Just short of level, so orbiting never puts the viewer under the district plates. */
+const MAX_POLAR_ANGLE = Math.PI * 0.495;
+
+function clamp(value: number, min: number, max: number): number {
+	return Math.min(Math.max(value, min), max);
+}
+
+const NOTCH_SLOT_PITCH_RATIO = 0.1;
+const NOTCH_MAX_SLOT_PITCH = 0.18;
+const NOTCH_THICKNESS_RATIO = 0.5;
+const NOTCH_TOP_CLEARANCE = 1.8;
+const NOTCH_RADIAL_OVERHANG = 1.45;
+const CRITICAL_CAP_OVERHANG = 1.85;
+const CRITICAL_CAP_THICKNESS_RATIO = 1.45;
+
+/** One box wrapped around a column: `side` is its x/z footprint, `thickness` its height. */
+export interface NotchBox {
+	y: number;
+	side: number;
+	thickness: number;
+}
+
+function columnRadiusAt(columnHeight: number, columnWidth: number, y: number): number {
+	const t = y / columnHeight;
+	return columnWidth * (COLUMN_RADIUS_BOTTOM + (COLUMN_RADIUS_TOP - COLUMN_RADIUS_BOTTOM) * t);
+}
+
+function notchSlotPitch(columnHeight: number): number {
+	return Math.min(columnHeight * NOTCH_SLOT_PITCH_RATIO, NOTCH_MAX_SLOT_PITCH);
+}
+
+/**
+ * Bands wrap the column rather than capping it so the rank stays countable from any orbit angle.
+ */
+export function computeNotchBands(
+	severity: Severity,
+	columnHeight: number,
+	columnWidth: number,
+): NotchBox[] {
+	const rank = SEVERITY_NOTCHES[severity];
+	if (rank <= 0) return [];
+
+	const pitch = notchSlotPitch(columnHeight);
+	const thickness = pitch * NOTCH_THICKNESS_RATIO;
+	const topY = columnHeight - pitch * NOTCH_TOP_CLEARANCE - thickness / 2;
+
+	const bands: NotchBox[] = [];
+	for (let i = 0; i < rank; i++) {
+		const y = topY - i * pitch;
+		bands.push({
+			y,
+			side: columnRadiusAt(columnHeight, columnWidth, y) * 2 * NOTCH_RADIAL_OVERHANG,
+			thickness,
+		});
+	}
+	return bands;
+}
+
+/** An overhanging apex slab so the top rank is identifiable before the bands become countable. */
+export function computeCriticalCap(
+	severity: Severity,
+	columnHeight: number,
+	columnWidth: number,
+): NotchBox | null {
+	if (severity !== 'CRITICAL') return null;
+	const thickness = notchSlotPitch(columnHeight) * CRITICAL_CAP_THICKNESS_RATIO;
+	return {
+		y: columnHeight - thickness / 2,
+		side: columnWidth * COLUMN_RADIUS_TOP * 2 * CRITICAL_CAP_OVERHANG,
+		thickness,
+	};
+}
 
 export class ThreeSceneRenderer implements SceneRenderer {
 	private renderer!: THREE.WebGLRenderer;
@@ -38,9 +127,22 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	private container: HTMLElement | null = null;
 	private animationId = 0;
 
+	// Geometries are owned by the renderer instance and outlive every rebuild.
+	private nodeGeometry = new THREE.CylinderGeometry(
+		COLUMN_RADIUS_TOP,
+		COLUMN_RADIUS_BOTTOM,
+		1,
+		6,
+		1,
+		false,
+	);
+	private notchGeometry = new THREE.BoxGeometry(1, 1, 1);
+
 	private instancedMesh: THREE.InstancedMesh | null = null;
+	private notchMesh: THREE.InstancedMesh | null = null;
 	private edgeLines: THREE.LineSegments | null = null;
 	private districtGroup: THREE.Group | null = null;
+	private grid: THREE.GridHelper | null = null;
 	private nodeIds: string[] = [];
 	private graph: GraphModel | null = null;
 
@@ -54,6 +156,10 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	private hoveredNodeId: string | null = null;
 	private timer = new THREE.Timer();
 	private cancelCameraAnimation: (() => void) | null = null;
+
+	private pointerDownAt: { x: number; y: number } | null = null;
+	private velocity: CameraMove = {};
+	private viewFramed = false;
 
 	mount(container: HTMLElement) {
 		this.container = container;
@@ -72,7 +178,15 @@ export class ThreeSceneRenderer implements SceneRenderer {
 		this.controls.dampingFactor = 0.15;
 		this.controls.rotateSpeed = 0.5;
 		this.controls.minDistance = 3;
-		this.controls.maxDistance = 200;
+		this.controls.maxDistance = DEFAULT_MAX_DISTANCE;
+		// Panning should follow the pointer rather than slide along the ground plane.
+		this.controls.screenSpacePanning = true;
+		this.controls.mouseButtons = {
+			LEFT: THREE.MOUSE.ROTATE,
+			MIDDLE: THREE.MOUSE.PAN,
+			RIGHT: THREE.MOUSE.PAN,
+		};
+		this.controls.maxPolarAngle = MAX_POLAR_ANGLE;
 
 		this.raycaster = new NodeRaycaster(this.camera);
 
@@ -93,8 +207,10 @@ export class ThreeSceneRenderer implements SceneRenderer {
 		this.timer.dispose();
 
 		// 3. Event listeners
+		this.velocity = {};
 		this.container?.removeEventListener('pointermove', this.handlePointerMove);
-		this.container?.removeEventListener('click', this.handleClick);
+		this.container?.removeEventListener('pointerdown', this.handlePointerDown, true);
+		this.container?.removeEventListener('pointerup', this.handlePointerUp);
 
 		// 4. Three.js resources (glow overlay)
 		if (this.glowMesh) {
@@ -106,19 +222,18 @@ export class ThreeSceneRenderer implements SceneRenderer {
 
 		this.controls?.dispose();
 
-		if (this.instancedMesh) {
-			this.instancedMesh.geometry.dispose();
-			if (this.instancedMesh.material instanceof THREE.Material) {
-				this.instancedMesh.material.dispose();
-			}
-		}
-		if (this.edgeLines) {
-			this.edgeLines.geometry.dispose();
-			if (this.edgeLines.material instanceof THREE.Material) {
-				this.edgeLines.material.dispose();
-			}
-		}
+		this.disposeNodeMeshes();
+		this.disposeEdgeLines();
 		this.disposeDistricts();
+
+		if (this.grid) {
+			this.scene.remove(this.grid);
+			this.grid.dispose();
+			this.grid = null;
+		}
+
+		this.nodeGeometry.dispose();
+		this.notchGeometry.dispose();
 
 		this.scene.clear();
 
@@ -133,9 +248,11 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	}
 
 	setGraphModel(model: GraphModel) {
+		// Findings reload on every filter change and SSE event; reframing then would yank the camera back.
+		const cameFromEmpty = (this.graph?.nodes.size ?? 0) === 0;
 		this.graph = model;
 		this.rebuildScene(model);
-		this.resetView();
+		if (!this.viewFramed || cameFromEmpty) this.resetView();
 	}
 
 	focusCluster(clusterId: string) {
@@ -163,27 +280,35 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	}
 
 	resetView() {
-		const bounds = this.getSceneBounds();
-		if (bounds) {
-			const { cx, cz, maxHeight, spanX, spanZ } = bounds;
-			const horizontalSpan = Math.max(spanX, spanZ);
-			const dist = Math.max(horizontalSpan * 1.45, maxHeight * 1.35, 18);
-			const elevate = Math.max(CAMERA_VERTICAL_PADDING, maxHeight * 0.7);
+		const box = this.getContentBox();
+		this.viewFramed = box !== null;
+		this.updateRoamLimits();
+		this.cancelCameraAnimation?.();
+		this.cancelCameraAnimation = animateCamera(
+			this.camera,
+			this.controls,
+			box
+				? fitPreset(box, this.camera.fov, this.camera.aspect)
+				: overviewPreset(this.graph?.clusters.length ?? 1),
+		);
+	}
 
-			this.cancelCameraAnimation?.();
-			this.cancelCameraAnimation = animateCamera(this.camera, this.controls, {
-				position: new THREE.Vector3(cx + horizontalSpan * 0.32, elevate, cz + dist),
-				lookAt: new THREE.Vector3(cx, maxHeight * 0.35, cz),
-			});
-		} else {
-			const clusterCount = this.graph?.clusters.length ?? 1;
-			this.cancelCameraAnimation?.();
-			this.cancelCameraAnimation = animateCamera(
-				this.camera,
-				this.controls,
-				overviewPreset(clusterCount),
-			);
-		}
+	/** The columns and their district plates — deliberately not the grid helper around them. */
+	private getContentBox(): THREE.Box3 | null {
+		const bounds = this.getSceneBounds();
+		if (!bounds) return null;
+		return new THREE.Box3(
+			new THREE.Vector3(
+				bounds.minX - DISTRICT_PADDING_X / 2,
+				0,
+				bounds.minZ - DISTRICT_PADDING_Z / 2,
+			),
+			new THREE.Vector3(
+				bounds.maxX + DISTRICT_PADDING_X / 2,
+				bounds.maxHeight,
+				bounds.maxZ + DISTRICT_PADDING_Z / 2,
+			),
+		);
 	}
 
 	zoomIn(): void {
@@ -209,18 +334,106 @@ export class ThreeSceneRenderer implements SceneRenderer {
 	}
 
 	setViewPreset(preset: 'top' | 'front'): void {
-		const bounds = this.getSceneBounds();
-		const cx = bounds?.cx ?? 0;
-		const cy = bounds ? bounds.maxHeight * 0.35 : 0;
-		const span = bounds ? Math.max(bounds.spanX, bounds.spanZ) : 20;
-		const target = preset === 'top' ? topDownPreset(cx, cy, span) : frontPreset(cx, cy, span);
+		const box = this.getContentBox();
+		if (!box) return;
 		this.cancelCameraAnimation?.();
-		this.cancelCameraAnimation = animateCamera(this.camera, this.controls, target);
+		this.cancelCameraAnimation = animateCamera(
+			this.camera,
+			this.controls,
+			fitPreset(
+				box,
+				this.camera.fov,
+				this.camera.aspect,
+				preset === 'top' ? TOP_DIRECTION : FRONT_DIRECTION,
+			),
+		);
+	}
+
+	moveCamera(move: CameraMove): void {
+		if (!this.controls) return;
+
+		const forward = new THREE.Vector3().subVectors(this.controls.target, this.camera.position);
+		// Travel stays horizontal so forward does not dive into the ground when looking down.
+		forward.y = 0;
+		if (forward.lengthSq() < 1e-8) forward.set(0, 0, -1);
+		forward.normalize();
+		const right = new THREE.Vector3(-forward.z, 0, forward.x);
+
+		const step = this.moveStep();
+		const offset = new THREE.Vector3()
+			.addScaledVector(right, (move.right ?? 0) * step)
+			.addScaledVector(forward, (move.forward ?? 0) * step);
+		offset.y += (move.up ?? 0) * step;
+		if (offset.lengthSq() === 0) return;
+
+		const bounds = this.getSceneBounds();
+		const scale = this.sceneScale();
+		const radius = scale * ROAM_RADIUS_RATIO;
+		const cx = bounds?.cx ?? 0;
+		const cz = bounds?.cz ?? 0;
+
+		const desired = this.controls.target.clone().add(offset);
+		const applied = new THREE.Vector3(
+			clamp(desired.x, cx - radius, cx + radius),
+			clamp(desired.y, 0, scale * ROAM_HEIGHT_RATIO),
+			clamp(desired.z, cz - radius, cz + radius),
+		).sub(this.controls.target);
+
+		this.controls.target.add(applied);
+		this.camera.position.add(applied);
+		this.clampAboveGround();
+	}
+
+	setCameraVelocity(move: CameraMove): void {
+		this.velocity = move;
+	}
+
+	/** Mouse panning gets the same leash as the keys, through the controls' own target sphere. */
+	private updateRoamLimits() {
+		if (!this.controls) return;
+		const bounds = this.getSceneBounds();
+		this.controls.cursor.set(bounds?.cx ?? 0, (bounds?.maxHeight ?? 0) * 0.35, bounds?.cz ?? 0);
+		const scale = this.sceneScale();
+		this.controls.maxTargetRadius = scale * ROAM_RADIUS_RATIO;
+		// A wide skyline needs to be framed from further out than the default ceiling allows.
+		this.controls.maxDistance = Math.max(DEFAULT_MAX_DISTANCE, scale * 4);
+	}
+
+	private clampAboveGround() {
+		if (this.camera.position.y >= MIN_CAMERA_HEIGHT) return;
+		const lift = MIN_CAMERA_HEIGHT - this.camera.position.y;
+		this.camera.position.y += lift;
+		this.controls.target.y += lift;
+	}
+
+	private stepCamera(delta: number) {
+		if (delta <= 0) return;
+		const { right = 0, forward = 0, up = 0 } = this.velocity;
+		if (right === 0 && forward === 0 && up === 0) return;
+		const factor = KEY_MOVE_STEPS_PER_SECOND * delta;
+		this.moveCamera({ right: right * factor, forward: forward * factor, up: up * factor });
+	}
+
+	private sceneScale(): number {
+		const bounds = this.getSceneBounds();
+		if (!bounds) return MIN_SCENE_SCALE;
+		return Math.max(bounds.spanX, bounds.spanZ, bounds.maxHeight, MIN_SCENE_SCALE);
+	}
+
+	/** Close to a column a scene-sized step overshoots, so the orbit distance keeps it proportional. */
+	private moveStep(): number {
+		const scale = this.sceneScale();
+		const distance = this.camera.position.distanceTo(this.controls.target);
+		return clamp(distance, scale * 0.25, scale) * MOVE_STEP_RATIO;
 	}
 
 	private getSceneBounds(): {
 		cx: number;
 		cz: number;
+		minX: number;
+		maxX: number;
+		minZ: number;
+		maxZ: number;
 		maxHeight: number;
 		spanX: number;
 		spanZ: number;
@@ -242,6 +455,10 @@ export class ThreeSceneRenderer implements SceneRenderer {
 		return {
 			cx: (minX + maxX) / 2,
 			cz: (minZ + maxZ) / 2,
+			minX,
+			maxX,
+			minZ,
+			maxZ,
 			maxHeight,
 			spanX: maxX - minX || 10,
 			spanZ: maxZ - minZ || 10,
@@ -292,7 +509,7 @@ export class ThreeSceneRenderer implements SceneRenderer {
 			this.glowMaterial = createGlowMaterial();
 		}
 
-		const mesh = new THREE.Mesh(NODE_GEOMETRY, this.glowMaterial);
+		const mesh = new THREE.Mesh(this.nodeGeometry, this.glowMaterial);
 		mesh.applyMatrix4(matrix);
 		mesh.scale.multiplyScalar(1.03);
 		mesh.name = 'glow-overlay';
@@ -319,8 +536,8 @@ export class ThreeSceneRenderer implements SceneRenderer {
 		rim.position.set(-10, 12, -14);
 		this.scene.add(rim);
 
-		const grid = new THREE.GridHelper(200, 40, 0x12314a, 0x07131d);
-		this.scene.add(grid);
+		this.grid = new THREE.GridHelper(200, 40, 0x12314a, 0x07131d);
+		this.scene.add(this.grid);
 	}
 
 	private handlePointerMove = (e: PointerEvent) => {
@@ -329,15 +546,24 @@ export class ThreeSceneRenderer implements SceneRenderer {
 		const nodeId = this.raycaster.pick();
 		if (nodeId !== this.hoveredNodeId) {
 			this.hoveredNodeId = nodeId;
-			// Disable camera rotation while hovering a node so click targets stay stable
-			this.controls.enableRotate = nodeId == null;
 			this.hoverCallback?.(nodeId, nodeId ? { x: e.clientX, y: e.clientY } : undefined);
 		}
 	};
 
-	private handleClick = (e: MouseEvent) => {
-		if (!this.container) return;
-		this.raycaster.updatePointer(e as PointerEvent, this.container);
+	private handlePointerDown = (e: PointerEvent) => {
+		this.pointerDownAt = { x: e.clientX, y: e.clientY };
+		// OrbitControls reads mouseButtons when it handles the press, so this has to land first.
+		this.controls.mouseButtons.LEFT = e.shiftKey ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+	};
+
+	private handlePointerUp = (e: PointerEvent) => {
+		const start = this.pointerDownAt;
+		this.pointerDownAt = null;
+		this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+		if (!start || !this.container) return;
+		if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > CLICK_DRAG_THRESHOLD_PX) return;
+
+		this.raycaster.updatePointer(e, this.container);
 		const nodeId = this.raycaster.pick();
 		if (nodeId) {
 			this.clickCallback?.(nodeId);
@@ -346,7 +572,8 @@ export class ThreeSceneRenderer implements SceneRenderer {
 
 	private setupEvents(container: HTMLElement) {
 		container.addEventListener('pointermove', this.handlePointerMove);
-		container.addEventListener('click', this.handleClick);
+		container.addEventListener('pointerdown', this.handlePointerDown, true);
+		container.addEventListener('pointerup', this.handlePointerUp);
 	}
 
 	private rebuildScene(model: GraphModel) {
@@ -354,22 +581,11 @@ export class ThreeSceneRenderer implements SceneRenderer {
 		this.setSelectedNode(null);
 
 		// Remove old meshes
-		if (this.instancedMesh) {
-			this.scene.remove(this.instancedMesh);
-			this.instancedMesh.geometry.dispose();
-			if (this.instancedMesh.material instanceof THREE.Material) {
-				this.instancedMesh.material.dispose();
-			}
-		}
-		if (this.edgeLines) {
-			this.scene.remove(this.edgeLines);
-			this.edgeLines.geometry.dispose();
-			if (this.edgeLines.material instanceof THREE.Material) {
-				this.edgeLines.material.dispose();
-			}
-		}
+		this.disposeNodeMeshes();
+		this.disposeEdgeLines();
 		this.disposeDistricts();
 
+		this.nodeIds = [];
 		const nodes = Array.from(model.nodes.values());
 		if (nodes.length === 0) return;
 
@@ -378,22 +594,29 @@ export class ThreeSceneRenderer implements SceneRenderer {
 
 		// Instanced mesh for nodes
 		const material = createNodeMaterial();
-		const mesh = new THREE.InstancedMesh(NODE_GEOMETRY, material, nodes.length);
+		const mesh = new THREE.InstancedMesh(this.nodeGeometry, material, nodes.length);
 		const matrix = new THREE.Matrix4();
 		const color = new THREE.Color();
 
-		this.nodeIds = [];
+		const notchBoxes: Array<NotchBox & { x: number; z: number }> = [];
+
 		for (let i = 0; i < nodes.length; i++) {
 			const node = nodes[i];
 			if (!node) continue;
 			this.nodeIds.push(node.id);
-			const width = Math.min(MAX_COLUMN_WIDTH, 0.18 + node.visual.size * 0.12);
+			const width = this.getColumnWidth(node);
 			const height = this.getColumnHeight(node);
 			matrix.makeScale(width, height, width);
 			matrix.setPosition(node.position.x, height / 2, node.position.z);
 			mesh.setMatrixAt(i, matrix);
 			color.set(node.visual.color).lerp(new THREE.Color(0xffffff), node.epssScore * 0.18);
 			mesh.setColorAt(i, color);
+
+			for (const band of computeNotchBands(node.severity, height, width)) {
+				notchBoxes.push({ ...band, x: node.position.x, z: node.position.z });
+			}
+			const cap = computeCriticalCap(node.severity, height, width);
+			if (cap) notchBoxes.push({ ...cap, x: node.position.x, z: node.position.z });
 		}
 		mesh.instanceMatrix.needsUpdate = true;
 		if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
@@ -403,6 +626,28 @@ export class ThreeSceneRenderer implements SceneRenderer {
 		this.instancedMesh = mesh;
 		this.raycaster.setInstancedMesh(mesh, this.nodeIds);
 
+		// Severity rank as dark bands — one extra draw call for the whole skyline
+		if (notchBoxes.length > 0) {
+			const notchMesh = new THREE.InstancedMesh(
+				this.notchGeometry,
+				createNotchMaterial(),
+				notchBoxes.length,
+			);
+			notchMesh.name = 'severity-notches';
+			for (let i = 0; i < notchBoxes.length; i++) {
+				const box = notchBoxes[i];
+				if (!box) continue;
+				matrix.makeScale(box.side, box.thickness, box.side);
+				matrix.setPosition(box.x, box.y, box.z);
+				notchMesh.setMatrixAt(i, matrix);
+			}
+			notchMesh.instanceMatrix.needsUpdate = true;
+			notchMesh.castShadow = false;
+			notchMesh.receiveShadow = false;
+			this.scene.add(notchMesh);
+			this.notchMesh = notchMesh;
+		}
+
 		// Edge lines
 		if (model.edges.length > 0) {
 			const positions: number[] = [];
@@ -410,12 +655,13 @@ export class ThreeSceneRenderer implements SceneRenderer {
 				const src = model.nodes.get(edge.source);
 				const tgt = model.nodes.get(edge.target);
 				if (src && tgt) {
+					// Attach near the column tops: node.position.y is the raw score, not the built height
 					positions.push(
 						src.position.x,
-						src.position.y,
+						this.getColumnHeight(src) * EDGE_ATTACH_RATIO,
 						src.position.z,
 						tgt.position.x,
-						tgt.position.y,
+						this.getColumnHeight(tgt) * EDGE_ATTACH_RATIO,
 						tgt.position.z,
 					);
 				}
@@ -430,6 +676,34 @@ export class ThreeSceneRenderer implements SceneRenderer {
 
 	private getColumnHeight(node: GraphNode): number {
 		return Math.max(MIN_COLUMN_HEIGHT, 1 + node.decreeScore * 1.1);
+	}
+
+	private getColumnWidth(node: GraphNode): number {
+		return Math.min(MAX_COLUMN_WIDTH, 0.18 + node.visual.size * 0.12);
+	}
+
+	private disposeEdgeLines() {
+		if (!this.edgeLines) return;
+		this.scene.remove(this.edgeLines);
+		this.edgeLines.geometry.dispose();
+		if (this.edgeLines.material instanceof THREE.Material) {
+			this.edgeLines.material.dispose();
+		}
+		this.edgeLines = null;
+	}
+
+	/** Meshes and materials are per-build; the geometries they share are not. */
+	private disposeNodeMeshes() {
+		for (const mesh of [this.instancedMesh, this.notchMesh]) {
+			if (!mesh) continue;
+			this.scene.remove(mesh);
+			if (mesh.material instanceof THREE.Material) {
+				mesh.material.dispose();
+			}
+			mesh.dispose();
+		}
+		this.instancedMesh = null;
+		this.notchMesh = null;
 	}
 
 	private createDistrictGroup(model: GraphModel): THREE.Group {
@@ -528,8 +802,10 @@ export class ThreeSceneRenderer implements SceneRenderer {
 		this.animationId = requestAnimationFrame((timestamp) => {
 			this.timer.update(timestamp);
 			this.updateGlow();
+			this.stepCamera(this.timer.getDelta());
 
 			this.controls.update();
+			this.clampAboveGround();
 			this.renderer.render(this.scene, this.camera);
 			this.animate();
 		});

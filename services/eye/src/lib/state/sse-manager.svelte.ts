@@ -1,7 +1,7 @@
 import { env } from '$env/dynamic/public';
 import { createSSEConnection, type SSEConnection } from '$lib/api/sse';
 import { applyFindingUpdate } from '$lib/graph/updater';
-import type { Finding } from '$lib/types/api';
+import type { FindingChangedEvent } from '$lib/types/api';
 import { appState } from './app.svelte';
 
 const GATEWAY_URL = env.PUBLIC_GATEWAY_URL ?? 'http://localhost:8400';
@@ -19,16 +19,20 @@ function createSSEManager() {
 			lastEventId: lastEventId ?? undefined,
 			onEvent(event) {
 				lastEventId = event.id;
-				if (event.type === 'finding_changed') {
-					const finding: Finding = JSON.parse(event.data);
-					appState.graphModel = applyFindingUpdate(appState.graphModel, finding, appState.targets);
-				}
+				if (event.type !== 'finding_changed') return;
+
+				const finding = parseFindingChanged(event.data);
+				if (!finding) return;
+
+				appState.graphModel = applyFindingUpdate(appState.graphModel, finding, appState.targets);
+			},
+			onOpen() {
+				connected = true;
 			},
 			onError() {
 				connected = false;
 			},
 		});
-		connected = true;
 	}
 
 	function disconnect() {
@@ -49,6 +53,16 @@ function createSSEManager() {
 		connect,
 		disconnect,
 	};
+}
+
+/** The stream is an external boundary: one bad frame must not kill the connection. */
+function parseFindingChanged(data: string): FindingChangedEvent | null {
+	try {
+		return JSON.parse(data) as FindingChangedEvent;
+	} catch {
+		console.warn('discarded malformed finding_changed payload');
+		return null;
+	}
 }
 
 export const sseManager = createSSEManager();

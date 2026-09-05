@@ -1,3 +1,14 @@
+<script lang="ts" module>
+export function formatTimelineLabel(iso: string): string {
+	return new Date(iso).toLocaleDateString(undefined, {
+		month: 'short',
+		day: 'numeric',
+		hour: '2-digit',
+		minute: '2-digit',
+	});
+}
+</script>
+
 <script lang="ts">
 import { Pause, Play, Radio, SkipBack, SkipForward } from 'lucide-svelte';
 import { timelineState } from '$lib/state/timeline.svelte';
@@ -11,6 +22,9 @@ const { minDate, maxDate }: Props = $props();
 
 const isLive = $derived(timelineState.mode === 'live');
 const isPlaying = $derived(timelineState.mode === 'replaying');
+
+const TRANSPORT_CLASS =
+	'p-1 text-hud-text-muted hover:text-hud-accent transition-colors disabled:opacity-30';
 
 function onSliderInput(e: Event) {
 	const value = Number.parseInt((e.target as HTMLInputElement).value, 10);
@@ -31,21 +45,26 @@ function sliderValue(): number {
 
 function formatTime(iso: string | null): string {
 	if (!iso) return 'Live';
-	const d = new Date(iso);
-	return d.toLocaleDateString(undefined, {
-		month: 'short',
-		day: 'numeric',
-		hour: '2-digit',
-		minute: '2-digit',
-	});
+	return formatTimelineLabel(iso);
 }
+
+const valueText = $derived(
+	timelineState.currentTime
+		? formatTimelineLabel(timelineState.currentTime)
+		: `Live, ${formatTimelineLabel(maxDate)}`,
+);
 </script>
 
-<div class="hud-panel flex items-center gap-2 px-3 py-2 backdrop-blur bg-hud-base/80">
+<div
+	role="group"
+	aria-label="Timeline playback"
+	class="hud-panel flex items-center gap-2 px-3 py-2 backdrop-blur bg-hud-base/80"
+>
 	<button
-		class="p-1 text-hud-text-muted hover:text-hud-accent transition-colors disabled:opacity-30"
+		class={TRANSPORT_CLASS}
 		onclick={() => timelineState.stepBackward()}
 		disabled={isLive}
+		aria-label="Step backward"
 		title="Step back"
 	>
 		<SkipBack size={14} />
@@ -53,24 +72,27 @@ function formatTime(iso: string | null): string {
 
 	{#if isPlaying}
 		<button
-			class="p-1 text-hud-text-muted hover:text-hud-accent transition-colors"
+			class={TRANSPORT_CLASS}
 			onclick={() => timelineState.pause()}
+			aria-label="Pause replay"
 			title="Pause"
 		>
 			<Pause size={14} />
 		</button>
 	{:else if timelineState.mode === 'paused'}
 		<button
-			class="p-1 text-hud-text-muted hover:text-hud-accent transition-colors"
+			class={TRANSPORT_CLASS}
 			onclick={() => timelineState.resume()}
+			aria-label="Resume replay"
 			title="Resume"
 		>
 			<Play size={14} />
 		</button>
 	{:else}
 		<button
-			class="p-1 text-hud-text-muted hover:text-hud-accent transition-colors"
+			class={TRANSPORT_CLASS}
 			onclick={() => timelineState.startReplay(minDate)}
+			aria-label="Replay from the start"
 			title="Replay"
 		>
 			<Play size={14} />
@@ -78,9 +100,10 @@ function formatTime(iso: string | null): string {
 	{/if}
 
 	<button
-		class="p-1 text-hud-text-muted hover:text-hud-accent transition-colors disabled:opacity-30"
+		class={TRANSPORT_CLASS}
 		onclick={() => timelineState.stepForward()}
 		disabled={isLive}
+		aria-label="Step forward"
 		title="Step forward"
 	>
 		<SkipForward size={14} />
@@ -92,6 +115,8 @@ function formatTime(iso: string | null): string {
 		max="1000"
 		value={sliderValue()}
 		oninput={onSliderInput}
+		aria-label="Timeline position"
+		aria-valuetext={valueText}
 		class="mx-2 flex-1"
 	/>
 
@@ -100,12 +125,13 @@ function formatTime(iso: string | null): string {
 	</span>
 
 	<button
-		class="rounded-sm px-2 py-0.5 font-mono text-xs transition-colors {isLive ? 'hud-border-active bg-hud-accent/10 text-hud-accent hud-live-pulse' : 'bg-hud-surface text-hud-text-muted border border-hud-border hover:text-hud-accent'}"
+		class="rounded-sm px-2 py-0.5 font-mono text-xs transition-colors {isLive ? 'hud-border-active bg-hud-accent/10 text-hud-accent hud-live-pulse' : 'bg-hud-surface text-hud-text-muted border border-hud-border-control hover:text-hud-accent'}"
 		onclick={() => timelineState.goLive()}
+		aria-pressed={isLive}
 		title="Go live"
 	>
 		<span class="flex items-center gap-1">
-			<Radio size={12} />
+			<Radio size={12} aria-hidden="true" />
 			Live
 		</span>
 	</button>

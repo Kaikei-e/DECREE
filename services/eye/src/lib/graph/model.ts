@@ -1,12 +1,27 @@
-export type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
+// The scanner's severity_label() only ever emits critical/high/medium/low/unknown, so the
+// last level is genuinely "we could not score this" — not an informational finding.
+export type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN';
 
 export const SEVERITY_COLORS: Record<Severity, string> = {
 	CRITICAL: '#FF1744',
 	HIGH: '#FF9100',
 	MEDIUM: '#FFD600',
 	LOW: '#448AFF',
-	INFO: '#00E676',
+	UNKNOWN: '#9AA0A6',
 };
+
+// Red/green colour-vision deficiency collapses the coloured levels onto
+// one yellow axis, so severity is also encoded as a notch count everywhere it is drawn.
+// UNKNOWN gets zero notches and a neutral hue so it never reads as the safest level.
+export const SEVERITY_NOTCHES: Record<Severity, number> = {
+	CRITICAL: 4,
+	HIGH: 3,
+	MEDIUM: 2,
+	LOW: 1,
+	UNKNOWN: 0,
+};
+
+export const SEVERITY_NOTCH_MAX = 4;
 
 export interface GraphNode {
 	id: string; // instance_id
