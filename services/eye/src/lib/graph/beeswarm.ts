@@ -89,13 +89,15 @@ export interface AxisTick {
 }
 
 /** Decades read as 0.1% / 1% / 10% far more easily than as 0.001 / 0.01 / 0.1. */
+// Written out rather than computed: 10 ** -n is not required to be correctly rounded, and
+// V8 versions disagree in the last bit, which made the tick values engine-dependent.
+const EPSS_DECADES = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1];
+
 export function epssTicks(): AxisTick[] {
-	const ticks: AxisTick[] = [];
-	for (let exponent = Math.round(Math.log10(EPSS_FLOOR)); exponent <= 0; exponent++) {
-		const value = 10 ** exponent;
-		ticks.push({ value, label: `${Number((value * 100).toPrecision(2))}%` });
-	}
-	return ticks;
+	return EPSS_DECADES.filter((value) => value >= EPSS_FLOOR).map((value) => ({
+		value,
+		label: `${Number((value * 100).toPrecision(2))}%`,
+	}));
 }
 
 export function scoreTicks(): AxisTick[] {
