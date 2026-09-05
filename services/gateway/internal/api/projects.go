@@ -18,3 +18,21 @@ func (h *projectsHandler) list(w http.ResponseWriter, r *http.Request) error {
 	writeJSON(w, http.StatusOK, map[string]any{"data": projects})
 	return nil
 }
+
+func (h *projectsHandler) get(w http.ResponseWriter, r *http.Request) error {
+	projectID, err := parseUUID(r.PathValue("id"))
+	if err != nil {
+		return err
+	}
+
+	project, err := h.store.GetProject(r.Context(), projectID)
+	if err != nil {
+		return ErrInternal("failed to get project", err)
+	}
+	if project == nil {
+		return ErrNotFound("not_found", "project not found")
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"data": project})
+	return nil
+}

@@ -18,6 +18,7 @@ func NewRouter(store db.Store, broker *sse.Broker) http.Handler {
 	// REST API
 	ph := &projectsHandler{store: store}
 	mux.HandleFunc("GET /api/projects", handleApp(ph.list))
+	mux.HandleFunc("GET /api/projects/{id}", handleApp(ph.get))
 
 	th := &targetsHandler{store: store}
 	mux.HandleFunc("GET /api/projects/{id}/targets", handleApp(th.list))
@@ -25,8 +26,14 @@ func NewRouter(store db.Store, broker *sse.Broker) http.Handler {
 	fh := &findingsHandler{store: store}
 	mux.HandleFunc("GET /api/projects/{id}/findings", handleApp(fh.list))
 
+	ah := &advisoriesHandler{store: store}
+	mux.HandleFunc("GET /api/projects/{id}/advisories", handleApp(ah.list))
+
 	fdh := &findingDetailHandler{store: store}
 	mux.HandleFunc("GET /api/findings/{instance_id}", handleApp(fdh.get))
+
+	fch := &facetsHandler{store: store}
+	mux.HandleFunc("GET /api/projects/{id}/facets", handleApp(fch.get))
 
 	trh := &topRisksHandler{store: store}
 	mux.HandleFunc("GET /api/projects/{id}/top-risks", handleApp(trh.list))
