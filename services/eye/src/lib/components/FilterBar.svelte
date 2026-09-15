@@ -1,5 +1,5 @@
 <script lang="ts">
-import { Box, ChartScatter, RotateCcw, Search, Table } from 'lucide-svelte';
+import { Box, ChartScatter, RotateCcw, Search, Table } from '@lucide/svelte';
 import { untrack } from 'svelte';
 import { goto } from '$app/navigation';
 import { page } from '$app/state';
