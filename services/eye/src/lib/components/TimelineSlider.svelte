@@ -10,7 +10,7 @@ export function formatTimelineLabel(iso: string): string {
 </script>
 
 <script lang="ts">
-import { Pause, Play, Radio, SkipBack, SkipForward } from 'lucide-svelte';
+import { Pause, Play, Radio, SkipBack, SkipForward } from '@lucide/svelte';
 import { timelineState } from '$lib/state/timeline.svelte';
 
 interface Props {

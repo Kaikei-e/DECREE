@@ -1,5 +1,5 @@
 <script lang="ts">
-import { ArrowDown, ArrowUp, ChevronsUpDown, Loader2 } from 'lucide-svelte';
+import { ArrowDown, ArrowUp, ChevronsUpDown, Loader2 } from '@lucide/svelte';
 import type { FindingSort } from '$lib/api/client';
 import { parseSeverity } from '$lib/graph/layout';
 import SeverityBadge from './SeverityBadge.svelte';

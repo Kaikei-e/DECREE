@@ -1,5 +1,5 @@
 <script lang="ts">
-import { ArrowLeft, ExternalLink, Loader2, X } from 'lucide-svelte';
+import { ArrowLeft, ExternalLink, Loader2, X } from '@lucide/svelte';
 import { parseSeverity } from '$lib/graph/layout';
 import type { AdvisoryGroup, Finding, FindingDetail } from '$lib/types/api';
 import ScoreBreakdown from './ScoreBreakdown.svelte';

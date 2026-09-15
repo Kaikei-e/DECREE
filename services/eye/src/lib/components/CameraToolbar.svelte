@@ -1,5 +1,5 @@
 <script lang="ts">
-import { ArrowDown, ArrowRight, Keyboard, Maximize, ZoomIn, ZoomOut } from 'lucide-svelte';
+import { ArrowDown, ArrowRight, Keyboard, Maximize, ZoomIn, ZoomOut } from '@lucide/svelte';
 
 interface Props {
 	onZoomIn: () => void;

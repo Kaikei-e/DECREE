@@ -22,8 +22,8 @@ jobs:
       run:
         working-directory: services/oracle
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.26.8"
       - run: gofmt -l . | (! grep .)
@@ -37,8 +37,8 @@ jobs:
       run:
         working-directory: services/gateway
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.26.8"
       - run: gofmt -l . | (! grep .)

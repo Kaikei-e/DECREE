@@ -1,5 +1,5 @@
 <script lang="ts">
-import { Folder } from 'lucide-svelte';
+import { Folder } from '@lucide/svelte';
 import { SEVERITY_COLORS } from '$lib/graph/model';
 import type { Facets } from '$lib/types/api';
 

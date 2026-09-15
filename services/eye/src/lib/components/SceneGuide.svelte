@@ -1,5 +1,5 @@
 <script lang="ts">
-import { TriangleAlert } from 'lucide-svelte';
+import { TriangleAlert } from '@lucide/svelte';
 import type { VisualizationInsights } from '$lib/graph/insights';
 import type { RendererFallback } from '$lib/renderer/types';
 import type { ViewMode } from '$lib/state/query-params';

@@ -1,6 +1,6 @@
 <script lang="ts">
 import '../app.css';
-import { Shield } from 'lucide-svelte';
+import { Shield } from '@lucide/svelte';
 import { navigating } from '$app/state';
 
 let { children } = $props();

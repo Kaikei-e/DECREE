@@ -1,5 +1,5 @@
 <script lang="ts">
-import { AlertTriangle, CircleHelp, Shield, ShieldAlert, ShieldCheck } from 'lucide-svelte';
+import { AlertTriangle, CircleHelp, Shield, ShieldAlert, ShieldCheck } from '@lucide/svelte';
 import {
 	SEVERITY_COLORS,
 	SEVERITY_NOTCH_MAX,
